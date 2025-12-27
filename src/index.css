@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base clara para o site todo */
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Opcional: altura mínima para ocupar a tela inteira */
+#root {
+  min-height: 100vh;
+}
+.page-fade {
+  animation: pageFade 0.25s ease-out;
+}
+
+@keyframes pageFade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sheet-up {
+  animation: sheetUp 0.18s ease-out;
+}
+
+@keyframes sheetUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
