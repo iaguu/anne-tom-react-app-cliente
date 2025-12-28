@@ -13,6 +13,11 @@ const normalizeText = (value) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
+const safeNumber = (value) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+};
+
 export const normalizeBadgesFromItem = (item) => {
   const rawBadges = Array.isArray(item.badges) ? item.badges : [];
   const name = item.name || item.nome || "";
@@ -86,11 +91,6 @@ export const normalizePizzasFromJson = (json) => {
   else if (Array.isArray(json.items)) items = json.items;
   else items = [];
 
-  const safeNumber = (value) => {
-    const numberValue = Number(value);
-    return Number.isFinite(numberValue) ? numberValue : null;
-  };
-
   return items
     .filter((item) => {
       if (item.active === false) return false;
@@ -124,4 +124,60 @@ export const normalizePizzasFromJson = (json) => {
         sugestoes: Array.isArray(item.sugestoes) ? item.sugestoes : [],
       };
     });
+};
+
+export const normalizeExtrasFromJson = (json) => {
+  let items = [];
+
+  if (!json) items = [];
+  else if (Array.isArray(json)) items = json;
+  else if (Array.isArray(json.products)) items = json.products;
+  else if (Array.isArray(json.items)) items = json.items;
+  else items = [];
+
+  return items
+    .map((item, index) => {
+      const typeRaw = String(item.type || "").toLowerCase();
+      const categoriaRaw = String(item.categoria || item.category || "").toLowerCase();
+
+      let normalizedType = typeRaw;
+      if (!normalizedType) {
+        if (
+          categoriaRaw.includes("bebida") ||
+          categoriaRaw.includes("refrigerante") ||
+          categoriaRaw.includes("suco")
+        ) {
+          normalizedType = "drink";
+        } else if (
+          categoriaRaw.includes("extra") ||
+          categoriaRaw.includes("adicional") ||
+          categoriaRaw.includes("borda")
+        ) {
+          normalizedType = "extra";
+        } else {
+          normalizedType = "pizza";
+        }
+      }
+
+      if (normalizedType !== "extra") return null;
+
+      const basePrice = safeNumber(
+        item.price ?? item.preco ?? item.valor ?? item.value ?? null
+      );
+      const precoBroto = safeNumber(item.priceBroto ?? item.preco_broto ?? basePrice);
+      const precoGrande = safeNumber(
+        item.priceGrande ?? item.preco_grande ?? basePrice
+      );
+
+      return {
+        id: String(item.id ?? `extra-${index + 1}`),
+        nome: item.name || item.nome || "",
+        categoria: item.categoria || item.category || "",
+        ingredientes: Array.isArray(item.ingredientes) ? item.ingredientes : [],
+        preco_broto: precoBroto,
+        preco_grande: precoGrande,
+        raw: item,
+      };
+    })
+    .filter(Boolean);
 };

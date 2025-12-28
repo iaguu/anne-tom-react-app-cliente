@@ -7,7 +7,7 @@ import {
   useLocation,
   Link,
 } from "react-router-dom";
-import { CartProvider } from "./context/CartContext";
+import { CartProvider, useCart } from "./context/CartContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 
 import CardapioPage from "./pages/CardapioPage";
@@ -36,6 +36,11 @@ const ProtectedRoute = ({ children }) => {
 const AppLayout = ({ children }) => {
   const location = useLocation();
   const { customer, logout } = useAuth();
+  const { items } = useCart();
+  const totalItems = items.reduce(
+    (acc, item) => acc + Number(item.quantidade || item.quantity || 0),
+    0
+  );
 
   if (location.pathname === "/login") {
     return (
@@ -64,13 +69,27 @@ const AppLayout = ({ children }) => {
                   "cliente"}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={logout}
-              className="text-xs font-semibold uppercase tracking-wide text-white/80 hover:text-white"
-            >
-              Sair
-            </button>
+            <div className="flex items-center gap-3">
+              {totalItems > 0 && (
+                <Link
+                  to="/checkout"
+                  className="md:hidden inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-white/25"
+                  aria-label={`Ver carrinho com ${totalItems} itens`}
+                >
+                  Ver carrinho
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-700 px-2 text-[10px] font-bold text-white">
+                    {totalItems}
+                  </span>
+                </Link>
+              )}
+              <button
+                type="button"
+                onClick={logout}
+                className="text-xs font-semibold uppercase tracking-wide text-white/80 hover:text-white"
+              >
+                Sair
+              </button>
+            </div>
           </div>
 
           <nav className="flex gap-2 rounded-full bg-black/20 px-2 py-2 text-xs shadow-2xl backdrop-blur">
@@ -78,17 +97,28 @@ const AppLayout = ({ children }) => {
               const isActive = tab.match.some((m) =>
                 activePath === "/" ? m === "/" : activePath.startsWith(m)
               );
+              const showBadge = tab.to === "/checkout" && totalItems > 0;
               return (
                 <Link
                   key={tab.to}
                   to={tab.to}
+                  aria-label={
+                    showBadge ? `${tab.label} (${totalItems} itens)` : tab.label
+                  }
                   className={`flex-1 rounded-full px-3 py-1.5 text-center text-[12px] font-semibold transition ${
                     isActive
                       ? "bg-white text-emerald-900 shadow-2xl ring-2 ring-white/90"
                       : "bg-white/30 text-white hover:bg-white/50"
                   } border border-white/70 shadow-xl`}
                 >
-                  {tab.label}
+                  <span className="inline-flex items-center justify-center gap-2">
+                    {tab.label}
+                    {showBadge && (
+                      <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-700 px-2 text-[10px] font-bold text-white">
+                        {totalItems}
+                      </span>
+                    )}
+                  </span>
                 </Link>
               );
             })}

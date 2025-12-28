@@ -1,5 +1,5 @@
 // src/hooks/useCheckout.js
-import { useRef, useEffect, useMemo, useState } from "react";
+import { useCallback, useRef, useEffect, useMemo, useState } from "react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import server from "../api/server";
@@ -16,50 +16,8 @@ const {
     "Pizzaria Anne & Tom, Alto de Santana, Sao Paulo",
 } = import.meta.env;
 
-/* ================= WHATSAPP BUILDER ================== */
+const CHECKOUT_DRAFT_KEY = "checkout_draft";
 
-const montarTextoWhatsApp = (itens, cliente, totalFinal, pagamento) => {
-  const itensStr = itens
-    .map((i) => {
-      const totalItem = (i.precoUnitario * i.quantidade)
-        .toFixed(2)
-        .replace(".", ",");
-
-      const saboresTexto =
-        Array.isArray(i.sabores) && i.sabores.length > 1
-          ? ` · sabores: ${i.sabores.join(" / ")}`
-          : i.meio
-          ? ` · meio a meio com ${i.meio}`
-          : "";
-      const obsPizza = i.obsPizza ? `\n    Obs: ${i.obsPizza}` : "";
-      const extrasTexto =
-        Array.isArray(i.extras) && i.extras.length > 0
-          ? `\n    Adicionais: ${i.extras.join(", ")}`
-          : "";
-
-      return `• ${i.quantidade}x ${i.nome} (${i.tamanho}${saboresTexto}) — R$ ${totalItem}${obsPizza}${extrasTexto}`;
-    })
-    .join("\n");
-
-  return (
-    `🍕 *Pedido Anne & Tom*` +
-    `\n\n*Itens:*` +
-    `\n${itensStr}` +
-    `\n\n*Subtotal:* R$ ${cliente.subtotal.toFixed(2).replace(".", ",")}` +
-    `\n*Taxa de entrega:* R$ ${cliente.taxaEntrega
-      .toFixed(2)
-      .replace(".", ",")}` +
-    `\n*Desconto:* - R$ ${cliente.desconto.toFixed(2).replace(".", ",")}` +
-    `\n\n*Total final:* R$ ${totalFinal.toFixed(2).replace(".", ",")}` +
-    `\n*Pagamento:* ${pagamento.toUpperCase()}` +
-    `\n\n*Cliente:* ${cliente.nome}` +
-    `\n*Telefone:* ${cliente.telefone}` +
-    `\n*CEP:* ${cliente.cep}` +
-    `\n*Endereço:* ${cliente.endereco}` +
-    `\n*Bairro:* ${cliente.bairro}` +
-    (cliente.obsGerais ? `\n\n*Observações gerais:* ${cliente.obsGerais}` : "")
-  );
-};
 
 /* ============ ENVIO PARA O DESKTOP (API NGROK) ============ */
 
@@ -88,6 +46,16 @@ async function enviarParaDesktop(items, dados, totalFinal, pagamento) {
         method: pagamento,
         changeFor: pagamento === "dinheiro" ? dados.troco || null : null,
         status: "pending",
+        pix:
+          pagamento === "pix" && dados.pixPayment
+            ? {
+                providerReference: dados.pixPayment.providerReference || null,
+                transactionId: dados.pixPayment.transactionId || null,
+                copiaColar: dados.pixPayment.copiaColar || null,
+                qrcode: dados.pixPayment.qrcode || null,
+                expiresAt: dados.pixPayment.expiresAt || null,
+              }
+            : null,
       },
 
       delivery: {
@@ -103,7 +71,9 @@ async function enviarParaDesktop(items, dados, totalFinal, pagamento) {
         quantity: i.quantidade,
         unitPrice: i.precoUnitario,
         lineTotal: i.precoUnitario * i.quantidade,
-        isHalfHalf: Array.isArray(i.sabores) ? i.sabores.length > 1 : !!i.meio,
+        isHalfHalf: Array.isArray(i.sabores)
+          ? i.sabores.length > 1
+          : !!i.meio,
         halfDescription: Array.isArray(i.sabores)
           ? i.sabores.join(" / ")
           : i.meio || "",
@@ -120,7 +90,7 @@ async function enviarParaDesktop(items, dados, totalFinal, pagamento) {
 
     console.log("📦 Enviando para desktop:", payload);
 
-    const res = await server.enviarParaDesktop(JSON.stringify(payload))
+    const res = await server.enviarParaDesktop(JSON.stringify(payload));
 
     if (!res.ok) {
       const txt = await res.text();
@@ -147,7 +117,9 @@ async function checkCustomerByPhone(phoneRaw) {
   }
 
   try {
-    const res = await server.checkCustomerByPhone(encodeURIComponent(phoneDigits))
+    const res = await server.checkCustomerByPhone(
+      encodeURIComponent(phoneDigits)
+    );
 
     if (res.status === 404) {
       return { found: false, customer: null };
@@ -186,7 +158,7 @@ async function salvarCliente(dadosCliente) {
   };
 
   try {
-    const res = await server.salvarCliente(JSON.stringify(payload))
+    const res = await server.salvarCliente(JSON.stringify(payload));
 
     if (!res.ok) {
       const txt = await res.text();
@@ -206,19 +178,18 @@ async function salvarCliente(dadosCliente) {
 /* ================= HOOK PRINCIPAL ================== */
 
 export function useCheckout() {
-  const {
-    items,
-    total,
-    updateQuantity,
-    removeItem,
-    clearCart,
-    addItem,
-  } = useCart();
+  const { items, total, updateQuantity, removeItem, clearCart, addItem } =
+    useCart();
 
   // 0: Carrinho | 1: Dados | 2: Revisão | 3: Pagamento
   const [passo, setPasso] = useState(0);
   const [pagamento, setPagamento] = useState("pix");
   const [cupom, setCupom] = useState("");
+  const [pixPayment, setPixPayment] = useState(null);
+  const [pixLoading, setPixLoading] = useState(false);
+  const [pixError, setPixError] = useState("");
+  const pixIdempotencyRef = useRef(null);
+  const pixTotalRef = useRef(null);
 
   const { customer } = useAuth();
 
@@ -277,6 +248,29 @@ export function useCheckout() {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CHECKOUT_DRAFT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.passo === "number") {
+        const safeStep = Math.min(3, Math.max(0, parsed.passo));
+        setPasso(safeStep);
+      }
+      if (parsed.pagamento) {
+        setPagamento(parsed.pagamento);
+      }
+      if (typeof parsed.cupom === "string") {
+        setCupom(parsed.cupom);
+      }
+      if (parsed.tipoCliente) {
+        setTipoCliente(parsed.tipoCliente);
+      }
+    } catch {
+      // ignora
+    }
+  }, []);
+
+  useEffect(() => {
     const toSave = {
       nome: dados.nome,
       telefone: dados.telefone,
@@ -304,6 +298,20 @@ export function useCheckout() {
   ]);
 
   useEffect(() => {
+    try {
+      const payload = {
+        passo,
+        pagamento,
+        cupom,
+        tipoCliente,
+      };
+      localStorage.setItem(CHECKOUT_DRAFT_KEY, JSON.stringify(payload));
+    } catch {
+      // ignora
+    }
+  }, [passo, pagamento, cupom, tipoCliente]);
+
+  useEffect(() => {
     if (!customer) return;
 
     setDados((prev) => ({
@@ -315,7 +323,8 @@ export function useCheckout() {
         customer.firstName ||
         customer.lastName ||
         prev.nome,
-      telefone: prev.telefone || customer.telefone || customer.phone || prev.telefone,
+      telefone:
+        prev.telefone || customer.telefone || customer.phone || prev.telefone,
       cep: prev.cep || customer.address?.cep || prev.cep,
       endereco:
         prev.endereco ||
@@ -328,7 +337,11 @@ export function useCheckout() {
         customer.address?.bairro ||
         prev.bairro,
       customerId:
-        prev.customerId || customer.id || customer._id || customer.customerId || null,
+        prev.customerId ||
+        customer.id ||
+        customer._id ||
+        customer.customerId ||
+        null,
     }));
     setTipoCliente("existing");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -359,11 +372,16 @@ export function useCheckout() {
 
   const semItens = items.length === 0;
 
+  const hasPixData =
+    pagamento !== "pix" ||
+    Boolean(pixPayment?.copiaColar || pixPayment?.qrcode);
+
   const podeEnviar =
     !semItens &&
     dados.nome.trim() &&
     dados.telefone.trim() &&
     (dados.retirada || dados.endereco.trim()) &&
+    hasPixData &&
     !enviando;
 
   /* =========== CUPOM =========== */
@@ -373,6 +391,109 @@ export function useCheckout() {
       setDados((d) => ({ ...d, desconto: 5 }));
     } else {
       setDados((d) => ({ ...d, desconto: 0 }));
+    }
+  };
+
+  /* =========== PIX (AXIONPAY) =========== */
+
+  const resetPixPayment = useCallback(() => {
+    setPixPayment(null);
+    setPixError("");
+    pixIdempotencyRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (pagamento !== "pix") {
+      resetPixPayment();
+    }
+  }, [pagamento, resetPixPayment]);
+
+  useEffect(() => {
+    const previousTotal = pixTotalRef.current;
+    pixTotalRef.current = totalFinal;
+
+    if (pagamento !== "pix") return;
+    if (previousTotal == null) return;
+    if (previousTotal === totalFinal) return;
+    if (!pixPayment) return;
+
+    resetPixPayment();
+  }, [totalFinal, pagamento, pixPayment, resetPixPayment]);
+
+  const buildPixPayload = (customerIdAtual) => {
+    const amountCents = Math.max(1, Math.round(totalFinal * 100));
+    const phoneDigits = (dados.telefone || "").replace(/\D/g, "");
+
+    return {
+      amount_cents: amountCents,
+      currency: "BRL",
+      customer: {
+        id: customerIdAtual || dados.customerId || null,
+        name: dados.nome || undefined,
+        phone: phoneDigits || undefined,
+      },
+      metadata: {
+        source: "anne-tom-app",
+        orderTotal: totalFinal,
+        itemsCount: totalItens,
+        customerId: customerIdAtual || dados.customerId || null,
+      },
+    };
+  };
+
+  const createPixPayment = async ({ force = false, customerId } = {}) => {
+    if (pixPayment && !force) return pixPayment;
+
+    setPixError("");
+    setPixLoading(true);
+
+    if (!pixIdempotencyRef.current || force) {
+      pixIdempotencyRef.current =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `pix-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    }
+
+    try {
+      const requestPayload = buildPixPayload(customerId);
+      const res = await server.createPixPayment(
+        requestPayload,
+        pixIdempotencyRef.current
+      );
+
+      // Wrapper toResponse (axios) → JSON está em res.data
+      const data = res?.data;
+
+      if (!res.ok || !data?.success || !data?.payload) {
+        setPixError(
+          data?.message ||
+            data?.error ||
+            "Nao foi possivel gerar o Pix agora."
+        );
+        return null;
+      }
+
+      const nextPixPayment = {
+        transactionId: data.transactionId || null,
+        providerReference: data.providerReference || null,
+        status: data.status || "pending",
+        amount: data.amount || totalFinal || null,
+        amountCents:
+          data.amount_cents || Math.max(1, Math.round(totalFinal * 100)),
+        qrcode: data.qrcode || null,
+        copiaColar: data.copia_colar || data.payload,
+        expiresAt: data.expiresAt || data.expires_at || null,
+        raw: data,
+      };
+
+      setPixPayment(nextPixPayment);
+      return nextPixPayment;
+    } catch (err) {
+      console.error("[useCheckout] pix error:", err);
+      setPixError("Nao foi possivel gerar o Pix agora.");
+      return null;
+    } finally {
+      setPixLoading(false);
     }
   };
 
@@ -560,6 +681,17 @@ export function useCheckout() {
         }
       }
 
+      let pixSnapshot = pixPayment;
+      if (pagamento === "pix") {
+        pixSnapshot = await createPixPayment({ customerId: customerIdAtual });
+        if (!pixSnapshot) {
+          return {
+            success: false,
+            error: "Falha ao gerar o Pix. Tente novamente.",
+          };
+        }
+      }
+
       // 2) monta dados completos pro resumo / API
       const payloadCliente = {
         ...dados,
@@ -572,7 +704,10 @@ export function useCheckout() {
       // 3) envia para desktop
       const desktopResult = await enviarParaDesktop(
         items,
-        payloadCliente,
+        {
+          ...payloadCliente,
+          pixPayment: pixSnapshot,
+        },
         totalFinal,
         pagamento
       );
@@ -614,6 +749,7 @@ export function useCheckout() {
         taxaEntrega,
         desconto,
         totalFinal,
+        pixPayment: pixSnapshot,
         dados: payloadCliente,
         waText: montarTextoWhatsApp(
           items,
@@ -639,12 +775,20 @@ export function useCheckout() {
         // ignora
       }
 
-      // 6) limpa carrinho
-      clearCart();
+      // 6) limpa carrinho apenas se o envio deu certo
+      const wasSuccess = !!desktopResult?.ok;
+      if (wasSuccess) {
+        clearCart();
+        try {
+          localStorage.removeItem(CHECKOUT_DRAFT_KEY);
+        } catch {
+          // ignore
+        }
+      }
 
       // 7) devolve tudo pro CheckoutPage
       return {
-        success: !!desktopResult?.ok,
+        success: wasSuccess,
         order,
         orderSummary,
         orderId: backendOrderId,
@@ -698,6 +842,10 @@ export function useCheckout() {
     // pagamento
     pagamento,
     setPagamento,
+    pixPayment,
+    pixLoading,
+    pixError,
+    createPixPayment,
 
     // totais
     subtotal,

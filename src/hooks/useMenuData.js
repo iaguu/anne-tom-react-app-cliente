@@ -1,7 +1,11 @@
 // src/hooks/useMenuData.js
 import { useEffect, useMemo, useState } from "react";
 import server from "../api/server";
-import { MENU_CACHE_KEY, normalizePizzasFromJson } from "../utils/menu";
+import {
+  MENU_CACHE_KEY,
+  normalizePizzasFromJson,
+  normalizeExtrasFromJson,
+} from "../utils/menu";
 
 const readCache = () => {
   try {
@@ -78,10 +82,12 @@ export const useMenuData = () => {
   }, []);
 
   const pizzas = useMemo(() => normalizePizzasFromJson(menuData), [menuData]);
+  const extras = useMemo(() => normalizeExtrasFromJson(menuData), [menuData]);
 
   return {
     menuData,
     pizzas,
+    extras,
     loadingMenu,
     menuError,
     isUsingCachedMenu,

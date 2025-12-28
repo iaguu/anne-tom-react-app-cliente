@@ -18,13 +18,14 @@ const FILTER_PRESETS = [
   { key: "doces", label: "Pizzas doces" },
 ];
 
-const OPENING_LABEL = "Terça a domingo das 19h às 23h (segunda fechado)";
+const OPENING_LABEL = "Terca a domingo das 19h as 23h (segunda fechado)";
 const OPENING_HOUR = 19;
 const CLOSING_HOUR = 23;
 
 const DELIVERY_RADIUS_KM = 15;
 const LOCATION_STORAGE_KEY = "delivery_location";
 const DISTANCE_STORAGE_KEY = "delivery_distance_km";
+const MANUAL_ADDRESS_STORAGE_KEY = "delivery_manual_address";
 
 const {
   VITE_GOOGLE_MAPS_API_KEY: DISTANCE_MATRIX_API_KEY = "",
@@ -80,39 +81,108 @@ const formatCountdown = (ms) => {
   return `${hours}h ${minutes}m`;
 };
 
-const getScheduleStatus = (date) => {
-  const now = new Date(date);
-  const day = now.getDay();
-  const isOpenDay = day !== 1;
-  const openTime = new Date(now);
-  openTime.setHours(OPENING_HOUR, 0, 0, 0);
-  const closeTime = new Date(now);
-  closeTime.setHours(CLOSING_HOUR, 0, 0, 0);
+const buildFallbackHours = () => ({
+  enabled: true,
+  openTime: `${String(OPENING_HOUR).padStart(2, "0")}:00`,
+  closeTime: `${String(CLOSING_HOUR).padStart(2, "0")}:00`,
+  closedWeekdays: [1],
+  weeklySchedule: [],
+});
 
-  const isOpen = isOpenDay && now >= openTime && now < closeTime;
-  if (isOpen) {
+const resolveScheduleEntry = (businessHours, day) => {
+  const schedule = Array.isArray(businessHours?.weeklySchedule)
+    ? businessHours.weeklySchedule
+    : [];
+  const closedWeekdays = Array.isArray(businessHours?.closedWeekdays)
+    ? businessHours.closedWeekdays
+    : [];
+  const entry =
+    schedule.find((item) => Number(item.day) === Number(day)) || {};
+  const enabled =
+    entry.enabled !== false && !closedWeekdays.includes(Number(day));
+  const openTime =
+    entry.openTime || businessHours?.openTime || "00:00";
+  const closeTime =
+    entry.closeTime || businessHours?.closeTime || "23:59";
+  return { enabled, openTime, closeTime };
+};
+
+const buildDateFromTime = (baseDate, timeValue) => {
+  const [h, m] = String(timeValue || "0:00")
+    .split(":")
+    .map((part) => Number(part));
+  const date = new Date(baseDate);
+  date.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
+  return date;
+};
+
+const findNextOpenDate = (now, businessHours) => {
+  for (let offset = 1; offset <= 7; offset += 1) {
+    const candidate = new Date(now);
+    candidate.setDate(now.getDate() + offset);
+    const entry = resolveScheduleEntry(businessHours, candidate.getDay());
+    if (!entry.enabled) continue;
+    return buildDateFromTime(candidate, entry.openTime);
+  }
+  return null;
+};
+
+const getScheduleStatus = (date, businessHours) => {
+  const now = new Date(date);
+  const fallback = buildFallbackHours();
+  const effective =
+    businessHours && typeof businessHours === "object"
+      ? businessHours
+      : fallback;
+
+  if (effective.enabled === false) {
     return {
       isOpen: true,
-      nextChangeAt: closeTime,
-      label: `Fecha em ${formatCountdown(closeTime - now)}`,
+      nextChangeAt: null,
+      label: "Horario livre",
+      scheduleLabel: OPENING_LABEL,
     };
   }
 
-  let nextOpen = new Date(now);
-  if (isOpenDay && now < openTime) {
-    nextOpen = openTime;
-  } else {
-    nextOpen.setDate(now.getDate() + 1);
-    nextOpen.setHours(OPENING_HOUR, 0, 0, 0);
-    while (nextOpen.getDay() === 1) {
-      nextOpen.setDate(nextOpen.getDate() + 1);
-    }
+  const todayEntry = resolveScheduleEntry(effective, now.getDay());
+  const openDate = buildDateFromTime(now, todayEntry.openTime);
+  let closeDate = buildDateFromTime(now, todayEntry.closeTime);
+
+  if (closeDate <= openDate) {
+    closeDate.setDate(closeDate.getDate() + 1);
+  }
+
+  const scheduleLabel = todayEntry.enabled
+    ? `Hoje ${todayEntry.openTime} - ${todayEntry.closeTime}`
+    : "Fechado hoje";
+
+  if (todayEntry.enabled && now >= openDate && now < closeDate) {
+    return {
+      isOpen: true,
+      nextChangeAt: closeDate,
+      label: `Fecha em ${formatCountdown(closeDate - now)}`,
+      scheduleLabel,
+    };
+  }
+
+  const nextOpen =
+    todayEntry.enabled && now < openDate
+      ? openDate
+      : findNextOpenDate(now, effective);
+  if (!nextOpen) {
+    return {
+      isOpen: false,
+      nextChangeAt: null,
+      label: "Fechado",
+      scheduleLabel,
+    };
   }
 
   return {
     isOpen: false,
     nextChangeAt: nextOpen,
     label: `Abre em ${formatCountdown(nextOpen - now)}`,
+    scheduleLabel,
   };
 };
 
@@ -193,21 +263,53 @@ const getExtraIdentifier = (extra, index) =>
       `extra-${index}`
   );
 
+const isBorderExtra = (extra) => {
+  if (!extra) return false;
+  const categoryText = normalizeText(extra.categoria || extra.category || "");
+  if (categoryText.includes("borda")) return true;
+  const nameText = normalizeText(extra.nome || extra.name || "");
+  return nameText.includes("borda");
+};
+
+const getExtraPrice = (extra, size) => {
+  if (!extra) return 0;
+  const priceKey = size === "broto" ? "preco_broto" : "preco_grande";
+  const value =
+    extra?.[priceKey] ??
+    extra?.preco ??
+    extra?.valor ??
+    extra?.price ??
+    extra?.value ??
+    0;
+  return safeNumber(value);
+};
+
 const CardapioPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { pizzas = [], loadingMenu, menuError, isUsingCachedMenu } = useMenuData();
+  const {
+    pizzas = [],
+    extras: extrasCatalog = [],
+    loadingMenu,
+    menuError,
+    isUsingCachedMenu,
+  } = useMenuData();
   const { items, addItem, replaceItem } = useCart();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("todas");
   const [preset, setPreset] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [deliveryMode, setDeliveryMode] = useState("delivery");
+  const [businessHours, setBusinessHours] = useState(null);
+  const [deliveryConfig, setDeliveryConfig] = useState(null);
+  const [settingsError, setSettingsError] = useState("");
+  const [settingsLoading, setSettingsLoading] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [selectedPizzaId, setSelectedPizzaId] = useState(null);
   const [quantity, setQuantity] = useState(1);
   const [selectedSize, setSelectedSize] = useState("grande");
   const [selectedExtras, setSelectedExtras] = useState([]);
+  const [selectedBorderId, setSelectedBorderId] = useState("");
   const [selectedFlavorIds, setSelectedFlavorIds] = useState([]);
   const [flavorSearch, setFlavorSearch] = useState("");
   const [observations, setObservations] = useState("");
@@ -216,6 +318,8 @@ const CardapioPage = () => {
   const [deliveryDistanceKm, setDeliveryDistanceKm] = useState(null);
   const [deliveryDistanceText, setDeliveryDistanceText] = useState("");
   const [deliveryDurationText, setDeliveryDurationText] = useState("");
+  const [deliveryReference, setDeliveryReference] = useState("");
+  const [manualAddress, setManualAddress] = useState("");
   const [withinDeliveryRadius, setWithinDeliveryRadius] = useState(null);
   const [deliveryError, setDeliveryError] = useState("");
   const [checkingDelivery, setCheckingDelivery] = useState(false);
@@ -228,22 +332,113 @@ const CardapioPage = () => {
   const toastTimerRef = useRef(null);
   const modalBodyRef = useRef(null);
 
-  const scheduleStatus = useMemo(() => getScheduleStatus(now), [now]);
+  const scheduleStatus = useMemo(
+    () => getScheduleStatus(now, businessHours),
+    [now, businessHours]
+  );
   const isOpenNow = scheduleStatus.isOpen;
   const scheduleCountdown = scheduleStatus.label;
+  const openingLabel = scheduleStatus.scheduleLabel || OPENING_LABEL;
+  const totalItems = useMemo(
+    () =>
+      items.reduce(
+        (acc, item) => acc + Number(item.quantidade || item.quantity || 0),
+        0
+      ),
+    [items]
+  );
+  const totalValue = useMemo(
+    () =>
+      items.reduce((acc, item) => {
+        const unit = Number(
+          item.precoUnitario || item.price || item.preco || item.valor || 0
+        );
+        const qty = Number(item.quantidade || item.quantity || 0);
+        return acc + unit * qty;
+      }, 0),
+    [items]
+  );
   const maxAdditionalFlavors = selectedSize === "broto" ? 1 : 2;
   const maxTotalFlavors = maxAdditionalFlavors + 1;
   const canOrder =
     isOpenNow && (deliveryMode === "pickup" || withinDeliveryRadius === true);
+  const deliveryRanges = useMemo(() => {
+    if (!deliveryConfig?.ranges || !Array.isArray(deliveryConfig.ranges)) {
+      return null;
+    }
+    return deliveryConfig.ranges
+      .map((range) => ({
+        minKm: Number(range.minKm),
+        maxKm: Number(range.maxKm),
+        price: Number(range.price),
+      }))
+      .filter((range) => Number.isFinite(range.minKm) && Number.isFinite(range.maxKm));
+  }, [deliveryConfig]);
+
+  const maxDeliveryRadiusKm = useMemo(() => {
+    const value = Number(deliveryConfig?.maxDistanceKm);
+    if (Number.isFinite(value)) {
+      if (value > 0) return value;
+      if (value === 0 && deliveryConfig) return null;
+    }
+    return DELIVERY_RADIUS_KM;
+  }, [deliveryConfig]);
+
   const deliveryFee = useMemo(() => {
     if (deliveryMode === "pickup") return 0;
     if (deliveryDistanceKm == null) return null;
+    if (Array.isArray(deliveryRanges) && deliveryRanges.length > 0) {
+      const match = deliveryRanges.find(
+        (range) =>
+          deliveryDistanceKm >= range.minKm &&
+          deliveryDistanceKm <= range.maxKm
+      );
+      return match ? match.price : null;
+    }
     return getFeeByDistance(deliveryDistanceKm);
-  }, [deliveryMode, deliveryDistanceKm]);
+  }, [deliveryMode, deliveryDistanceKm, deliveryRanges]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSettings = async () => {
+      setSettingsLoading(true);
+      setSettingsError("");
+      try {
+        const response = await serverInstance.baseDomain.instance.get(
+          "/api/pdv/settings"
+        );
+        if (response?.status && response.status >= 400) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        if (cancelled) return;
+        const payload = response?.data || {};
+        const settingsPayload = payload.settings || payload;
+        const business = payload.businessHours || settingsPayload.businessHours || null;
+        const delivery = settingsPayload.delivery || payload.delivery || null;
+
+        if (!cancelled) {
+          setBusinessHours(business);
+          setDeliveryConfig(delivery);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error("[Cardapio] settings error:", err);
+        setSettingsError("Nao foi possivel sincronizar os horarios.");
+      } finally {
+        if (!cancelled) setSettingsLoading(false);
+      }
+    };
+
+    loadSettings();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -269,6 +464,34 @@ const CardapioPage = () => {
       // ignore
     }
   }, [deliveryMode]);
+
+  useEffect(() => {
+    if (deliveryMode !== "pickup") return;
+    setDeliveryError("");
+  }, [deliveryMode]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(MANUAL_ADDRESS_STORAGE_KEY);
+      if (saved) {
+        setManualAddress(saved);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (manualAddress) {
+        localStorage.setItem(MANUAL_ADDRESS_STORAGE_KEY, manualAddress);
+      } else {
+        localStorage.removeItem(MANUAL_ADDRESS_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [manualAddress]);
 
   useEffect(() => {
     try {
@@ -386,7 +609,7 @@ const CardapioPage = () => {
     };
   }, [toast]);
 
-  const checkDeliveryDistance = async (coords) => {
+  const checkDeliveryDistance = async (destination, referenceLabel = "") => {
     if (!DISTANCE_MATRIX_API_KEY) {
       setDeliveryError("Chave do Google Maps nao configurada.");
       setWithinDeliveryRadius(false);
@@ -394,11 +617,18 @@ const CardapioPage = () => {
       return;
     }
 
+    if (!destination) {
+      setDeliveryError("Informe um endereco ou permita a localizacao.");
+      setWithinDeliveryRadius(null);
+      setCheckingDelivery(false);
+      return;
+    }
+
     try {
       setCheckingDelivery(true);
       setDeliveryError("");
+      setDeliveryReference(referenceLabel || "");
 
-      const destination = { lat: coords.lat, lng: coords.lng };
       const data = await getDistanceMatrix({
         apiKey: DISTANCE_MATRIX_API_KEY,
         origin: DELIVERY_ORIGIN,
@@ -408,7 +638,11 @@ const CardapioPage = () => {
       setDeliveryDistanceKm(km);
       setDeliveryDistanceText(data.distanceText || "");
       setDeliveryDurationText(data.durationText || "");
-      setWithinDeliveryRadius(km != null && km <= DELIVERY_RADIUS_KM);
+      const limit =
+        Number.isFinite(maxDeliveryRadiusKm) && maxDeliveryRadiusKm > 0
+          ? maxDeliveryRadiusKm
+          : null;
+      setWithinDeliveryRadius(km != null && (limit ? km <= limit : true));
       try {
         if (km != null) {
           localStorage.setItem(DISTANCE_STORAGE_KEY, String(km));
@@ -421,7 +655,7 @@ const CardapioPage = () => {
     } catch (err) {
       console.error("[Cardapio] delivery distance error:", err);
       setDeliveryError("Nao foi possivel validar o raio de entrega.");
-      setWithinDeliveryRadius(false);
+      setWithinDeliveryRadius(null);
       setDeliveryDistanceText("");
       setDeliveryDurationText("");
     } finally {
@@ -437,27 +671,65 @@ const CardapioPage = () => {
     }
 
     setCheckingDelivery(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const coords = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
-        try {
-          localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(coords));
-        } catch {
-          // ignore
-        }
-        checkDeliveryDistance(coords);
-      },
-      (error) => {
-        console.error("[Cardapio] geolocation error:", error);
-        setDeliveryError("Nao foi possivel obter sua localizacao.");
-        setWithinDeliveryRadius(false);
-        setCheckingDelivery(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    setDeliveryError("");
+
+    const handlePosition = (position) => {
+      const coords = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+      try {
+        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(coords));
+      } catch {
+        // ignore
+      }
+      checkDeliveryDistance(coords, "Localizacao atual");
+    };
+
+    const handleError = (error, allowFallback = true) => {
+      if (
+        allowFallback &&
+        (error.code === error.TIMEOUT ||
+          error.code === error.POSITION_UNAVAILABLE)
+      ) {
+        navigator.geolocation.getCurrentPosition(
+          handlePosition,
+          (fallbackError) => handleError(fallbackError, false),
+          { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 }
+        );
+        return;
+      }
+
+      console.error("[Cardapio] geolocation error:", error);
+      const message =
+        error.code === error.PERMISSION_DENIED
+          ? "Permita o acesso a localizacao no navegador."
+          : error.code === error.TIMEOUT
+          ? "Tempo esgotado ao buscar a localizacao."
+          : "Localizacao indisponivel no momento.";
+      setDeliveryError(message);
+      setWithinDeliveryRadius(null);
+      setDeliveryDistanceKm(null);
+      setDeliveryDistanceText("");
+      setDeliveryDurationText("");
+      setDeliveryReference("");
+      setCheckingDelivery(false);
+    };
+
+    navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0,
+    });
+  };
+
+  const handleManualAddressCheck = () => {
+    const value = manualAddress.trim();
+    if (!value) {
+      setDeliveryError("Digite um endereco ou CEP para calcular.");
+      return;
+    }
+    checkDeliveryDistance(value, value);
   };
 
   useEffect(() => {
@@ -482,11 +754,18 @@ const CardapioPage = () => {
       } catch {
         // ignore
       }
-      checkDeliveryDistance(cachedCoords);
-    } else {
-      requestLocation();
+      checkDeliveryDistance(cachedCoords, "Localizacao salva");
     }
   }, []);
+
+  useEffect(() => {
+    if (deliveryDistanceKm == null) return;
+    const limit =
+      Number.isFinite(maxDeliveryRadiusKm) && maxDeliveryRadiusKm > 0
+        ? maxDeliveryRadiusKm
+        : null;
+    setWithinDeliveryRadius(limit ? deliveryDistanceKm <= limit : true);
+  }, [deliveryDistanceKm, maxDeliveryRadiusKm]);
 
   useEffect(() => {
     if (!location.state?.editItemKey) return;
@@ -505,78 +784,10 @@ const CardapioPage = () => {
     );
   }, [items, editingItemKey]);
 
-  useEffect(() => {
-    if (!editingItem || pizzas.length === 0) return;
-
-    const flavorIds = Array.isArray(editingItem.saboresIds)
-      ? editingItem.saboresIds.map((id) => String(id))
-      : [];
-    let primaryId = flavorIds[0] || editingItem.idPizza || null;
-
-    if (!primaryId && editingItem.nome) {
-      const match = pizzas.find(
-        (pizza) =>
-          pizza.nome?.toLowerCase() === editingItem.nome.toLowerCase()
-      );
-      primaryId = match?.id || null;
-    }
-
-    if (!primaryId) return;
-
-    const extraFlavorIds = [];
-    if (flavorIds.length > 1) {
-      extraFlavorIds.push(...flavorIds.slice(1));
-    } else if (Array.isArray(editingItem.sabores)) {
-      const extraNames = editingItem.sabores.slice(1);
-      extraNames.forEach((name) => {
-        const match = pizzas.find(
-          (pizza) => pizza.nome?.toLowerCase() === String(name).toLowerCase()
-        );
-        if (match && String(match.id) !== String(primaryId)) {
-          extraFlavorIds.push(String(match.id));
-        }
-      });
-    } else if (editingItem.meio) {
-      String(editingItem.meio)
-        .split("/")
-        .map((name) => name.trim())
-        .filter(Boolean)
-        .forEach((name) => {
-          const match = pizzas.find(
-            (pizza) => pizza.nome?.toLowerCase() === name.toLowerCase()
-          );
-          if (match && String(match.id) !== String(primaryId)) {
-            extraFlavorIds.push(String(match.id));
-          }
-        });
-    }
-
-    setSelectedPizzaId(String(primaryId));
-    setSelectedSize(editingItem.tamanho || "grande");
-    setQuantity(editingItem.quantidade || 1);
-    setObservations(editingItem.obsPizza || "");
-    setSelectedFlavorIds(extraFlavorIds.slice(0, maxAdditionalFlavors));
-    setSelectedExtras([]);
-
-    const pizza = pizzas.find((p) => String(p.id) === String(primaryId));
-    const extrasFromItem = Array.isArray(editingItem.extras)
-      ? editingItem.extras
-      : [];
-    if (pizza?.extras?.length && extrasFromItem.length) {
-      const matchedExtras = pizza.extras.reduce((acc, extra, index) => {
-        const name = extra.nome || extra.name || extra.label;
-        if (name && extrasFromItem.includes(name)) {
-          acc.push(getExtraIdentifier(extra, index));
-        }
-        return acc;
-      }, []);
-      setSelectedExtras(matchedExtras);
-    }
-  }, [editingItem, pizzas]);
-
   const resetModalState = () => {
     setQuantity(1);
     setSelectedExtras([]);
+    setSelectedBorderId("");
     setSelectedFlavorIds([]);
     setFlavorSearch("");
     setObservations("");
@@ -682,17 +893,149 @@ const CardapioPage = () => {
       .filter(Boolean);
   }, [pizzas, selectedFlavorIds]);
 
-  const extrasList = selectedPizza?.extras || [];
+  const borderOptions = useMemo(
+    () => extrasCatalog.filter((extra) => isBorderExtra(extra)),
+    [extrasCatalog]
+  );
+
+  const ingredientExtras = useMemo(() => {
+    const apiExtras = extrasCatalog.filter((extra) => !isBorderExtra(extra));
+    if (apiExtras.length > 0) return apiExtras;
+
+    const fallbackExtras = Array.isArray(selectedPizza?.extras)
+      ? selectedPizza.extras.map((extra, index) => ({
+          id: extra?.id ?? extra?.code ?? extra?.slug ?? `extra-${index + 1}`,
+          nome: extra?.nome || extra?.name || extra?.label || String(extra),
+          categoria: extra?.categoria || extra?.category || "extra",
+          ingredientes: Array.isArray(extra?.ingredientes) ? extra.ingredientes : [],
+          preco_broto:
+            extra?.preco_broto ??
+            extra?.preco ??
+            extra?.valor ??
+            extra?.price ??
+            extra?.value ??
+            null,
+          preco_grande:
+            extra?.preco_grande ??
+            extra?.preco ??
+            extra?.valor ??
+            extra?.price ??
+            extra?.value ??
+            null,
+          raw: extra,
+        }))
+      : [];
+
+    return fallbackExtras;
+  }, [extrasCatalog, selectedPizza]);
+
+  const selectedBorder = useMemo(() => {
+    if (!selectedBorderId) return null;
+    const index = borderOptions.findIndex(
+      (extra, idx) => getExtraIdentifier(extra, idx) === selectedBorderId
+    );
+    return index >= 0 ? borderOptions[index] : null;
+  }, [borderOptions, selectedBorderId]);
+
+  const borderPrice = useMemo(
+    () => (selectedBorder ? getExtraPrice(selectedBorder, selectedSize) : 0),
+    [selectedBorder, selectedSize]
+  );
+
+  useEffect(() => {
+    if (!editingItem || pizzas.length === 0) return;
+
+    const flavorIds = Array.isArray(editingItem.saboresIds)
+      ? editingItem.saboresIds.map((id) => String(id))
+      : [];
+    let primaryId = flavorIds[0] || editingItem.idPizza || null;
+
+    if (!primaryId && editingItem.nome) {
+      const match = pizzas.find(
+        (pizza) =>
+          pizza.nome?.toLowerCase() === editingItem.nome.toLowerCase()
+      );
+      primaryId = match?.id || null;
+    }
+
+    if (!primaryId) return;
+
+    const extraFlavorIds = [];
+    if (flavorIds.length > 1) {
+      extraFlavorIds.push(...flavorIds.slice(1));
+    } else if (Array.isArray(editingItem.sabores)) {
+      const extraNames = editingItem.sabores.slice(1);
+      extraNames.forEach((name) => {
+        const match = pizzas.find(
+          (pizza) => pizza.nome?.toLowerCase() === String(name).toLowerCase()
+        );
+        if (match && String(match.id) !== String(primaryId)) {
+          extraFlavorIds.push(String(match.id));
+        }
+      });
+    } else if (editingItem.meio) {
+      String(editingItem.meio)
+        .split("/")
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .forEach((name) => {
+          const match = pizzas.find(
+            (pizza) => pizza.nome?.toLowerCase() === name.toLowerCase()
+          );
+          if (match && String(match.id) !== String(primaryId)) {
+            extraFlavorIds.push(String(match.id));
+          }
+        });
+    }
+
+    setSelectedPizzaId(String(primaryId));
+    setSelectedSize(editingItem.tamanho || "grande");
+    setQuantity(editingItem.quantidade || 1);
+    setObservations(editingItem.obsPizza || "");
+    setSelectedFlavorIds(extraFlavorIds.slice(0, maxAdditionalFlavors));
+    setSelectedExtras([]);
+    setSelectedBorderId("");
+
+    const extrasFromItem = Array.isArray(editingItem.extras)
+      ? editingItem.extras
+      : [];
+    const normalizedExtras = extrasFromItem.map((extra) => normalizeText(extra));
+    if (borderOptions.length && normalizedExtras.length) {
+      const borderIndex = borderOptions.findIndex((extra, index) => {
+        const name = extra.nome || extra.name || extra.label;
+        if (!name) return false;
+        const normalizedName = normalizeText(name);
+        return normalizedExtras.some((label) => label.includes(normalizedName));
+      });
+      if (borderIndex >= 0) {
+        setSelectedBorderId(
+          getExtraIdentifier(borderOptions[borderIndex], borderIndex)
+        );
+      }
+    }
+
+    if (ingredientExtras.length && normalizedExtras.length) {
+      const matchedExtras = ingredientExtras.reduce((acc, extra, index) => {
+        const name = extra.nome || extra.name || extra.label;
+        if (!name) return acc;
+        const normalizedName = normalizeText(name);
+        if (normalizedExtras.some((label) => label.includes(normalizedName))) {
+          acc.push(getExtraIdentifier(extra, index));
+        }
+        return acc;
+      }, []);
+      setSelectedExtras(matchedExtras);
+    }
+  }, [editingItem, pizzas, maxAdditionalFlavors, borderOptions, ingredientExtras]);
 
   const extrasTotal = useMemo(() => {
-    return extrasList.reduce((sum, extra, index) => {
+    return ingredientExtras.reduce((sum, extra, index) => {
       const id = getExtraIdentifier(extra, index);
       if (!selectedExtras.includes(id)) return sum;
-      const price =
-        safeNumber(extra.preco ?? extra.valor ?? extra.price ?? extra.value ?? 0);
+      const price = getExtraPrice(extra, selectedSize);
       return sum + price;
     }, 0);
-  }, [extrasList, selectedExtras]);
+  }, [ingredientExtras, selectedExtras, selectedSize]);
 
   const selectedFlavorPrices = useMemo(() => {
     if (!selectedPizza) return [];
@@ -706,8 +1049,8 @@ const CardapioPage = () => {
     if (!selectedPizza) return 0;
     const maxFlavorPrice =
       selectedFlavorPrices.length > 0 ? Math.max(...selectedFlavorPrices) : 0;
-    return maxFlavorPrice + extrasTotal;
-  }, [selectedPizza, selectedFlavorPrices, extrasTotal]);
+    return maxFlavorPrice + extrasTotal + borderPrice;
+  }, [selectedPizza, selectedFlavorPrices, extrasTotal, borderPrice]);
   const totalPrice = unitPrice * quantity;
 
   const toggleExtra = (id) => {
@@ -743,13 +1086,21 @@ const CardapioPage = () => {
 
   const handleAddToCart = () => {
     if (!selectedPizza || unitPrice <= 0 || !canOrder) return;
-    const extrasForItem = extrasList
+    const extrasForItem = ingredientExtras
       .map((extra, index) => {
         const id = getExtraIdentifier(extra, index);
         if (!selectedExtras.includes(id)) return null;
         return extra.nome || extra.name || extra.label || `Adicional ${index + 1}`;
       })
       .filter(Boolean);
+    if (selectedBorder) {
+      const borderLabel =
+        selectedBorder.nome ||
+        selectedBorder.name ||
+        selectedBorder.label ||
+        "Borda";
+      extrasForItem.unshift(`Borda: ${borderLabel}`);
+    }
     const flavorNames = [
       selectedPizza.nome,
       ...selectedFlavorPizzas.map((pizza) => pizza.nome),
@@ -851,9 +1202,12 @@ const CardapioPage = () => {
     isOpenNow && deliveryMode === "delivery" && withinDeliveryRadius === false;
   const needsDeliveryLocation =
     isOpenNow && deliveryMode === "delivery" && withinDeliveryRadius == null;
+  const deliveryRadiusLabel = Number.isFinite(maxDeliveryRadiusKm)
+    ? `${maxDeliveryRadiusKm} km`
+    : "sem limite";
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${totalItems > 0 ? "pb-24 md:pb-0" : ""}`}>
       <section className="space-y-5 rounded-[32px] bg-white/90 px-6 py-6 shadow-xl ring-1 ring-slate-200">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -874,7 +1228,14 @@ const CardapioPage = () => {
             onClick={() => navigate("/checkout")}
             className="text-xs font-semibold uppercase tracking-wide rounded-full border border-slate-200 px-4 py-2 text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
           >
-            Checkout
+            <span className="inline-flex items-center gap-2">
+              Checkout
+              {totalItems > 0 && (
+                <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-slate-900 px-2 text-[10px] font-bold text-white">
+                  {totalItems}
+                </span>
+              )}
+            </span>
           </button>
         </div>
         <div className="space-y-2">
@@ -899,10 +1260,20 @@ const CardapioPage = () => {
               />
               {isOpenNow ? "Aberto agora" : "Fechado no momento"}
             </span>
-            <span className="text-xs text-slate-400">{OPENING_LABEL}</span>
+            <span className="text-xs text-slate-400">{openingLabel}</span>
             <span className="text-xs font-semibold text-slate-500">
               {scheduleCountdown}
             </span>
+            {settingsLoading && (
+              <span className="text-[11px] text-slate-400">
+                Sincronizando horarios...
+              </span>
+            )}
+            {settingsError && (
+              <span className="text-[11px] text-amber-700">
+                {settingsError}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
@@ -933,6 +1304,68 @@ const CardapioPage = () => {
               </button>
             </div>
           </div>
+          {deliveryMode === "delivery" && (
+            <div className="mt-3 space-y-2 rounded-2xl border border-slate-200 bg-white/80 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                <span className="font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Entrega
+                </span>
+                <span>
+                  Raio: {Number.isFinite(maxDeliveryRadiusKm) ? `${maxDeliveryRadiusKm} km` : "sem limite"}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={requestLocation}
+                  disabled={checkingDelivery}
+                  className="h-9 rounded-full border border-slate-200 px-4 text-[11px] font-semibold uppercase tracking-wide text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Usar localizacao
+                </button>
+                <div className="flex h-9 flex-1 min-w-[220px] items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-xs">
+                  <input
+                    type="text"
+                    value={manualAddress}
+                    onChange={(event) => setManualAddress(event.target.value)}
+                    placeholder="Rua, numero, bairro ou CEP"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleManualAddressCheck();
+                      }
+                    }}
+                    className="min-w-0 flex-1 bg-transparent text-sm text-slate-600 outline-none placeholder:text-slate-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleManualAddressCheck}
+                    disabled={checkingDelivery || !manualAddress.trim()}
+                    className="h-7 shrink-0 rounded-full border border-slate-200 px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Calcular
+                  </button>
+                </div>
+              </div>
+              {checkingDelivery && (
+                <p className="text-[11px] text-slate-500">Calculando distancia...</p>
+              )}
+              {deliveryDistanceText && (
+                <p className="text-[11px] text-slate-600">
+                  Distancia: {deliveryDistanceText}
+                  {deliveryDurationText ? ` · ${deliveryDurationText}` : ""}
+                </p>
+              )}
+              {deliveryReference && (
+                <p className="text-[11px] text-slate-500">
+                  Referencia: {deliveryReference}
+                </p>
+              )}
+              {deliveryError && (
+                <p className="text-[11px] text-amber-700">{deliveryError}</p>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
             {!isOpenNow && (
               <span className="font-semibold text-amber-700">
@@ -1517,17 +1950,57 @@ const CardapioPage = () => {
                 </div>
               )}
 
-              {extrasList.length > 0 && (
+              {borderOptions.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-600">
-                    Adicionais
+                    Borda
                   </p>
                   <div className="grid gap-2">
-                    {extrasList.map((extra, index) => {
-                      const extraId = getExtraIdentifier(extra, index);
-                      const extraPrice = safeNumber(
-                        extra.preco ?? extra.valor ?? extra.price ?? extra.value ?? 0
+                    <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <span>Sem borda</span>
+                      <input
+                        type="radio"
+                        name="pizza-border"
+                        checked={!selectedBorderId}
+                        onChange={() => setSelectedBorderId("")}
+                      />
+                    </label>
+                    {borderOptions.map((extra, index) => {
+                      const borderId = getExtraIdentifier(extra, index);
+                      const borderPrice = getExtraPrice(extra, selectedSize);
+                      return (
+                        <label
+                          key={borderId}
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        >
+                          <span>{extra.nome || extra.name || `Borda ${index + 1}`}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500">
+                              {formatCurrencyBRL(borderPrice)}
+                            </span>
+                            <input
+                              type="radio"
+                              name="pizza-border"
+                              checked={selectedBorderId === borderId}
+                              onChange={() => setSelectedBorderId(borderId)}
+                            />
+                          </div>
+                        </label>
                       );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {ingredientExtras.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-600">
+                    Ingredientes extras
+                  </p>
+                  <div className="grid gap-2">
+                    {ingredientExtras.map((extra, index) => {
+                      const extraId = getExtraIdentifier(extra, index);
+                      const extraPrice = getExtraPrice(extra, selectedSize);
                       return (
                         <label
                           key={extraId}
@@ -1598,16 +2071,16 @@ const CardapioPage = () => {
                       : showDeliveryOutOfRange
                       ? "Fora do raio de entrega."
                       : needsDeliveryLocation
-                      ? "Precisa de localizacao para entrega."
+                      ? "Precisa informar um endereco para entrega."
                       : "Indisponivel no momento."}
                   </p>
                   <p className="mt-1 text-amber-700">
                     {!isOpenNow
                       ? "Agende seu pedido pelo WhatsApp e confirmamos o horario."
                       : showDeliveryOutOfRange
-                      ? "Voce pode tentar outro endereco dentro de 15 km."
+                      ? `Voce pode tentar outro endereco dentro de ${deliveryRadiusLabel}.`
                       : needsDeliveryLocation
-                      ? "Permita a localizacao para liberar a entrega."
+                      ? "Use a localizacao ou digite um endereco para liberar a entrega."
                       : "Tente novamente em instantes."}
                   </p>
                   {!isOpenNow && (
@@ -1646,7 +2119,11 @@ const CardapioPage = () => {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 z-50 max-w-xs rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-700 shadow-xl">
+        <div
+          className={`fixed right-4 z-50 max-w-xs rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-700 shadow-xl ${
+            totalItems > 0 ? "bottom-24 md:bottom-4" : "bottom-4"
+          }`}
+        >
           <p className="font-semibold">{toast.message}</p>
           <button
             type="button"
@@ -1654,6 +2131,23 @@ const CardapioPage = () => {
             className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 hover:text-emerald-600"
           >
             Ver carrinho
+          </button>
+        </div>
+      )}
+
+      {totalItems > 0 && (
+        <div className="md:hidden fixed bottom-4 left-0 right-0 z-40 px-4">
+          <button
+            type="button"
+            onClick={() => navigate("/checkout")}
+            aria-label={`Ver carrinho com ${totalItems} itens`}
+            className="flex w-full items-center justify-between gap-3 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-xl"
+          >
+            <span>Ver carrinho</span>
+            <span className="text-xs font-semibold text-white/80">
+              {totalItems} item{totalItems > 1 ? "s" : ""} ·{" "}
+              {formatCurrencyBRL(totalValue)}
+            </span>
           </button>
         </div>
       )}

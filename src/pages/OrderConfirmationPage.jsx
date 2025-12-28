@@ -87,6 +87,13 @@ const OrderConfirmationPage = () => {
   const [confirmingDelivery, setConfirmingDelivery] = useState(false);
   const [confirmError, setConfirmError] = useState("");
   const [deliveryConfirmed, setDeliveryConfirmed] = useState(false);
+  const [shareMessage, setShareMessage] = useState("");
+
+  useEffect(() => {
+    if (!shareMessage) return;
+    const timer = setTimeout(() => setShareMessage(""), 3500);
+    return () => clearTimeout(timer);
+  }, [shareMessage]);
 
   // -------------------------------------------------------------------
   // 1) Resolver resumo + trackingId (URL + state + localStorage)
@@ -216,6 +223,35 @@ const OrderConfirmationPage = () => {
         phone: trackingData.motoboyPhone || null,
       }
     : null;
+
+  const trackingShareUrl = trackingId
+    ? `${window.location.origin}/rastreamento?orderId=${encodeURIComponent(
+        trackingId
+      )}`
+    : "";
+
+  const handleShareTracking = async () => {
+    if (!trackingShareUrl) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Acompanhar pedido",
+          url: trackingShareUrl,
+        });
+        setShareMessage("Link pronto para compartilhar.");
+        return;
+      }
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trackingShareUrl);
+        setShareMessage("Link copiado para compartilhar.");
+        return;
+      }
+      setShareMessage(trackingShareUrl);
+    } catch (err) {
+      console.error("[OrderConfirmation] share error:", err);
+      setShareMessage("Nao foi possivel compartilhar o link.");
+    }
+  };
 
   // -------------------------------------------------------------------
   // 2) Polling em tempo real – agora lendo data.items[0] ou data.order
@@ -487,7 +523,8 @@ const OrderConfirmationPage = () => {
                 </div>
               </div>
 
-              {trackingStatus !== "done" &&
+              {trackingId &&
+                trackingStatus !== "done" &&
                 trackingStatus !== "cancelled" &&
                 !deliveryConfirmed && (
                   <div className="mt-3 flex flex-col gap-2">
@@ -666,6 +703,16 @@ const OrderConfirmationPage = () => {
                 Voltar ao cardápio
               </Link>
 
+              {trackingShareUrl && (
+                <button
+                  type="button"
+                  onClick={handleShareTracking}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-full border border-slate-300 bg-white hover:bg-slate-50"
+                >
+                  Compartilhar link
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() =>
@@ -676,6 +723,9 @@ const OrderConfirmationPage = () => {
                 Acompanhar pelo WhatsApp
               </button>
             </div>
+            {shareMessage && (
+              <p className="text-[11px] text-emerald-700">{shareMessage}</p>
+            )}
           </div>
 
           <p className="mt-4 text-[11px] text-center text-slate-500">

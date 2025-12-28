@@ -1,7 +1,8 @@
 // src/pages/OrdersPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useCart } from "../context/CartContext";
 import { serverInstance } from "../api/server";
 import { formatCurrencyBRL } from "../utils/menu";
 
@@ -31,7 +32,9 @@ const isActiveStatus = (status) => {
 };
 
 const OrdersPage = () => {
+  const navigate = useNavigate();
   const { customer } = useAuth();
+  const { addItem } = useCart();
   const resolvedCustomerId =
     customer?.id ||
     customer?._id ||
@@ -41,6 +44,95 @@ const OrdersPage = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [repeatMessage, setRepeatMessage] = useState("");
+
+  useEffect(() => {
+    if (!repeatMessage) return;
+    const timer = setTimeout(() => setRepeatMessage(""), 3500);
+    return () => clearTimeout(timer);
+  }, [repeatMessage]);
+
+  const resolveOrderItemName = (item) =>
+    item?.name ||
+    item?.productName ||
+    item?.nome ||
+    item?.descricao ||
+    "Pizza";
+
+  const buildCartItemFromOrderItem = (item, orderId, index) => {
+    const name = resolveOrderItemName(item);
+    const size =
+      item?.size ||
+      item?.tamanho ||
+      item?.sizeLabel ||
+      item?.tamanhoLabel ||
+      "grande";
+    const quantity = Number(
+      item?.quantity ?? item?.qty ?? item?.quantidade ?? 1
+    );
+    const lineTotal = Number(item?.lineTotal ?? item?.total ?? 0);
+    const unitPrice =
+      Number(item?.unitPrice ?? item?.price ?? item?.preco ?? 0) ||
+      (quantity ? lineTotal / quantity : 0);
+    const flavorText =
+      item?.halfDescription ||
+      item?.meio ||
+      item?.flavors ||
+      item?.sabores ||
+      "";
+    const flavors = typeof flavorText === "string" && flavorText.includes("/")
+      ? flavorText
+          .split("/")
+          .map((part) => part.trim())
+          .filter(Boolean)
+      : Array.isArray(flavorText)
+      ? flavorText
+      : [name];
+    const extras = Array.isArray(item?.extras)
+      ? item.extras
+          .map(
+            (extra) =>
+              extra?.name ||
+              extra?.label ||
+              extra?.descricao ||
+              extra?.nome ||
+              ""
+          )
+          .filter(Boolean)
+      : [];
+
+    return {
+      id: `reorder-${orderId || "order"}-${index}`,
+      idPizza: item?.productId || item?.id || null,
+      saboresIds: Array.isArray(item?.flavorIds)
+        ? item.flavorIds.map((flavorId) => String(flavorId))
+        : [],
+      sabores: flavors,
+      nome: flavors.join(" / ") || name,
+      tamanho: size,
+      quantidade: Number.isFinite(quantity) ? quantity : 1,
+      precoUnitario: Number.isFinite(unitPrice) ? unitPrice : 0,
+      extras,
+      obsPizza: item?.kitchenNotes || item?.obs || item?.observacao || null,
+    };
+  };
+
+  const handleRepeatOrder = (order) => {
+    const items = Array.isArray(order?.items)
+      ? order.items
+      : Array.isArray(order?.itens)
+      ? order.itens
+      : Array.isArray(order?.products)
+      ? order.products
+      : [];
+    if (!items.length) return;
+    const orderId = order?.id || order?._id || order?.orderId;
+    items.forEach((item, index) => {
+      addItem(buildCartItemFromOrderItem(item, orderId, index));
+    });
+    setRepeatMessage("Pedido adicionado ao carrinho.");
+    navigate("/checkout");
+  };
 
   useEffect(() => {
     if (!resolvedCustomerId) return;
@@ -149,6 +241,12 @@ const OrdersPage = () => {
           .
         </p>
       </section>
+
+      {repeatMessage && (
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+          {repeatMessage}
+        </div>
+      )}
 
       <section className="space-y-2">
         <div className="flex items-center justify-between">
@@ -310,6 +408,15 @@ const OrdersPage = () => {
                     )}
                   </span>
                 </p>
+                {Array.isArray(order.items) && order.items.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleRepeatOrder(order)}
+                    className="mt-2 inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    Repetir pedido
+                  </button>
+                )}
               </div>
             );
           })}

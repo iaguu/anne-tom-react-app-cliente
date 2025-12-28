@@ -51,6 +51,10 @@ const CheckoutPage = () => {
     // pagamento
     pagamento,
     setPagamento,
+    pixPayment,
+    pixLoading,
+    pixError,
+    createPixPayment,
 
     // totais
     subtotal,
@@ -183,6 +187,8 @@ const CheckoutPage = () => {
     }
   };
 
+  const disableAdvance = passo === 0 && totalItens === 0;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* HEADER */}
@@ -282,59 +288,90 @@ const CheckoutPage = () => {
                 totalFinal={totalFinal}
                 pagamento={pagamento}
                 setPagamento={setPagamento}
+                pixPayment={pixPayment}
+                pixLoading={pixLoading}
+                pixError={pixError}
+                onCreatePix={createPixPayment}
               />
             )}
 
             {/* BOTÕES NAVEGAÇÃO */}
-            <div className="flex justify-between pt-2 border-t border-slate-100">
-              <button
-                onClick={voltar}
-                disabled={passo === 0}
-                className={`px-5 py-2 rounded-full text-xs border border-slate-300 hover:bg-slate-100 ${
-                  passo === 0 ? "opacity-40 cursor-not-allowed" : ""
-                }`}
-              >
-                ← Voltar
-              </button>
-
-              {passo < 2 && (
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <div className="flex justify-between items-start">
                 <button
-                  onClick={avancar}
-                  className="px-6 py-2 rounded-full text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800"
-                >
-                  Avançar →
-                  {passo === 0 && totalItens > 0 && (
-                    <span className="ml-1 text-[10px] opacity-80">
-                      ({totalItens} item{totalItens > 1 ? "s" : ""})
-                    </span>
-                  )}
-                </button>
-              )}
-
-              {passo === 2 && (
-                <button
-                  onClick={avancar}
-                  className="px-6 py-2 rounded-full text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800"
-                >
-                  Confirmar e ir para pagamento →
-                </button>
-              )}
-
-              {passo === 3 && (
-                <button
-                  onClick={handleEnviarPedido}
-                  disabled={!podeEnviar}
-                  className={`px-7 py-3 rounded-full text-xs font-semibold ${
-                    podeEnviar
-                      ? "bg-emerald-500 text-slate-900 hover:bg-emerald-400"
-                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  onClick={voltar}
+                  disabled={passo === 0}
+                  className={`px-5 py-2 rounded-full text-xs border border-slate-300 hover:bg-slate-100 ${
+                    passo === 0 ? "opacity-40 cursor-not-allowed" : ""
                   }`}
                 >
-                  {enviando ? "Enviando..." : "Enviar Pedido"}
+                  {"\u2190 Voltar"}
                 </button>
-              )}
+
+                {passo < 2 && (
+                  <div className="flex flex-col items-end">
+                    <button
+                      onClick={avancar}
+                      disabled={disableAdvance}
+                      className={`px-6 py-2 rounded-full text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 ${
+                        disableAdvance ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                    >
+                      {"Avan\u00e7ar \u2192"}
+                      {passo === 0 && totalItens > 0 && (
+                        <span className="ml-1 text-[10px] opacity-80">
+                          ({totalItens} item{totalItens > 1 ? "s" : ""})
+                        </span>
+                      )}
+                    </button>
+                    {disableAdvance && (
+                      <span className="mt-1 text-[10px] text-slate-500">
+                        Adicione itens ao carrinho para continuar.
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {passo === 2 && (
+                  <button
+                    onClick={avancar}
+                    className="px-6 py-2 rounded-full text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800"
+                  >
+                    {"Confirmar e ir para pagamento \u2192"}
+                  </button>
+                )}
+
+                {passo === 3 && (
+                  <button
+                    onClick={handleEnviarPedido}
+                    disabled={!podeEnviar}
+                    className={`px-7 py-3 rounded-full text-xs font-semibold ${
+                      podeEnviar
+                        ? "bg-emerald-500 text-slate-900 hover:bg-emerald-400"
+                        : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                    }`}
+                  >
+                    {enviando ? "Enviando..." : "Enviar Pedido"}
+                  </button>
+                )}
+              </div>
+
               {checkoutError && (
-                <p className="mt-2 text-xs text-amber-700">{checkoutError}</p>
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  <span className="flex-1">{checkoutError}</span>
+                  <button
+                    type="button"
+                    onClick={handleEnviarPedido}
+                    disabled={!podeEnviar || enviando}
+                    className={`rounded-full border border-amber-300 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 ${
+                      !podeEnviar || enviando
+                        ? "cursor-not-allowed opacity-60"
+                        : "hover:bg-amber-100"
+                    }`}
+                  >
+                    {enviando ? "Enviando..." : "Tentar novamente"}
+                  </button>
+                </div>
               )}
             </div>
           </div>

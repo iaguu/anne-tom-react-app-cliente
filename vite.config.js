@@ -108,11 +108,28 @@ export default defineConfig(async () => {
     plugins: buildPlugins(),
     server: {
       port: devPort,
-      host: true
+      host: true,
+      proxy: {
+        "/api": {
+          target: "https://api.annetom.com",
+          changeOrigin: true,
+          secure: true
+        },
+        "/motoboy": {
+          target: "https://api.annetom.com",
+          changeOrigin: true,
+          secure: true
+        }
+      }
     },
     preview: {
       port: previewPort,
       host: true
+    },
+    test: {
+      environment: "jsdom",
+      setupFiles: "./src/test/setupTests.js",
+      globals: true
     }
   };
 });
