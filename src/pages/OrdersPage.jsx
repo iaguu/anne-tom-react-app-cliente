@@ -221,11 +221,9 @@ const OrdersPage = () => {
         </p>
 
         <div className="mt-2 h-2 w-full rounded-full bg-amber-100">
-          <div
-            className="h-2 rounded-full bg-amber-500 transition-all"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+                      <div
+                        className={`h-2 rounded-full bg-amber-500 transition-all w-[${progress}%]`}
+                      />        </div>
         <p className="mt-1 text-[10px] text-amber-900">
           Faltam{" "}
           <span className="font-semibold">

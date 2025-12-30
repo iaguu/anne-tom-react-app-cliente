@@ -18,16 +18,17 @@
     "react-router-dom": "^6.22.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/react": "^14.2.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.16",
     "detect-port": "^2.1.0",
-    "@testing-library/jest-dom": "^6.4.2",
-    "@testing-library/react": "^14.2.0",
     "jsdom": "^24.0.0",
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0",
+    "vite-plugin-svgr": "^4.5.0",
     "vitest": "^1.6.0"
   }
 }

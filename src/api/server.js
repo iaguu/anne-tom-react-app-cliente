@@ -30,7 +30,12 @@ const AXION_BEARER =
 const AXION_PIX_PATH =
   import.meta.env.VITE_AXIONPAY_PIX_PATH ||
   import.meta.env.VITE_AXION_PAY_PIX_PATH ||
-  "/api/axionpay/pix";
+  "/payments/pix";
+
+const AXION_CARD_PATH =
+  import.meta.env.VITE_AXIONPAY_CARD_PATH ||
+  import.meta.env.VITE_AXION_PAY_CARD_PATH ||
+  "/payments/card";
 
 const baseUrl = BASE_URL;
 const xApiKey = API_KEY;
@@ -187,6 +192,28 @@ const createPixPayment = async (params = {}, idempotencyKey) => {
   }
 };
 
+const createCardPayment = async (params = {}, idempotencyKey) => {
+  try {
+    const payload = normalizePayload(params);
+    const headers = {
+      ...(AXION_API_KEY ? { "x-api-key": AXION_API_KEY } : {}),
+      ...(AXION_BEARER ? { Authorization: `Bearer ${AXION_BEARER}` } : {}),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    };
+    const response = await serverInstance.baseDomain.instance.post(
+      AXION_CARD_PATH,
+      payload,
+      {
+        headers: Object.keys(headers).length ? headers : undefined,
+      }
+    );
+    return toResponse(response);
+  } catch (error) {
+    console.error("[server.createCardPayment] erro:", error);
+    return toErrorResponse(error);
+  }
+};
+
 const server = {
   fetchStatus,
   enviarParaDesktop,
@@ -195,6 +222,7 @@ const server = {
   fetchMenu,
   confirmDelivery,
   createPixPayment,
+  createCardPayment,
 };
 
 export default server;

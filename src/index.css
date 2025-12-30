@@ -40,3 +40,8 @@ body {
     transform: translateY(0);
   }
 }
+
+.powered-by-axionpay-text {
+  letter-spacing: 2px;
+  font-family: 'Montserrat', sans-serif;
+}

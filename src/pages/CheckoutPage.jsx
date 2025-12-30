@@ -10,44 +10,204 @@ import PagamentoStep from "../components/checkout/PagamentoStep";
 import ResumoLateral from "../components/checkout/ResumoLateral";
 import ResumoMobile from "../components/checkout/ResumoMobile";
 
+// Ícones em SVG simples para steps e botões
+const IconCart = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M4 5H5.5L7.5 16H18L20 8H8"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <circle cx="9.5" cy="19" r="1.2" stroke="currentColor" strokeWidth="1.4" />
+    <circle cx="17" cy="19" r="1.2" stroke="currentColor" strokeWidth="1.4" />
+  </svg>
+);
+
+const IconData = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <rect
+      x="5"
+      y="4"
+      width="14"
+      height="16"
+      rx="2"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    />
+    <path
+      d="M8 9H16M8 13H13"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const IconReview = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M5 6H19V16H9L6 19V16H5V6Z"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M9 10H15"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+    <path
+      d="M9 13H12.5"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const IconPayment = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <rect
+      x="3"
+      y="6"
+      width="18"
+      height="12"
+      rx="2"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    />
+    <path
+      d="M3 10H21"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+    <rect
+      x="7"
+      y="13"
+      width="4"
+      height="2"
+      rx="0.6"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+const IconArrowLeft = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M15 6L9 12L15 18"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconArrowRight = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M9 6L15 12L9 18"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconCheck = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <circle
+      cx="12"
+      cy="12"
+      r="9"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    />
+    <path
+      d="M8.5 12.5L11 15L15.5 9.5"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const stepIcons = [IconCart, IconData, IconReview, IconPayment];
+
 const CheckoutPage = () => {
   const navigate = useNavigate();
-
   const [checkoutError, setCheckoutError] = useState("");
 
   const {
     // cart
     items,
     totalItens,
-
     // etapas
     passo,
     etapas,
     avancar,
     voltar,
-
     // dados
     dados,
     setDados,
     tipoCliente,
     setTipoCliente,
-
     // cliente API
     clienteExistente,
     checandoCliente,
     erroClienteApi,
     onBuscarClientePorTelefone,
-
     // CEP
     buscarCep,
     buscandoCep,
     erroCep,
-
     // cupom
     cupom,
     setCupom,
     aplicarCupom,
-
     // pagamento
     pagamento,
     setPagamento,
@@ -55,7 +215,11 @@ const CheckoutPage = () => {
     pixLoading,
     pixError,
     createPixPayment,
-
+    // cartão
+    cardPayment,
+    cardLoading,
+    cardError,
+    createCardPayment,
     // totais
     subtotal,
     taxaEntrega,
@@ -69,25 +233,14 @@ const CheckoutPage = () => {
     distanceKm,
     distanceFee,
     deliveryFeeLabel,
-
     // cart actions
     updateQuantity,
     removeItem,
     addItem,
-
     // envio
     enviarPedido,
   } = useCheckout();
 
-  /**
-   * Handler de envio:
-   * espera que `enviarPedido()` retorne algo como:
-   * {
-   *   success: true,
-   *   order,          // objeto vindo do apiServer (orders-...)
-   *   orderSummary,   // resumo que a gente monta pro front
-   * }
-   */
   const handleEnviarPedido = async () => {
     if (!podeEnviar || enviando) return;
     setCheckoutError("");
@@ -97,7 +250,6 @@ const CheckoutPage = () => {
 
       console.log("[CheckoutPage] resultado enviarPedido:", result);
 
-      // se o hook não retornar nada ou der erro silencioso, não faz nada
       if (!result || result.success === false) {
         console.warn(
           "[CheckoutPage] enviarPedido não retornou resultado válido:",
@@ -118,16 +270,17 @@ const CheckoutPage = () => {
         numeroPedido,
         backendOrderId: backendOrderIdFromResult,
         trackingId: trackingIdFromResult,
-        items,
+        items: resultItems,
         orders,
       } = result;
 
       const firstOrderFromArray =
         Array.isArray(orders) && orders.length > 0 ? orders[0] : null;
       const firstItemFromArray =
-        Array.isArray(items) && items.length > 0 ? items[0] : null;
+        Array.isArray(resultItems) && resultItems.length > 0
+          ? resultItems[0]
+          : null;
 
-      // tenta descobrir o id real do pedido criado no backend (o mesmo do PDV / motoboy)
       const backendOrderId =
         trackingIdFromResult ||
         backendOrderIdFromResult ||
@@ -145,13 +298,6 @@ const CheckoutPage = () => {
         null;
 
       console.log("[CheckoutPage] backendOrderId resolvido:", backendOrderId);
-
-      if (!backendOrderId) {
-        console.warn(
-          "[CheckoutPage] Pedido criado, mas NÃO foi possível encontrar um ID para tracking.",
-          { result }
-        );
-      }
 
       const summaryToSend = {
         ...(orderSummary || {}),
@@ -183,61 +329,86 @@ const CheckoutPage = () => {
       setCheckoutError(
         "Ocorreu um erro ao enviar o pedido. Verifique sua conexão e tente novamente."
       );
-      // aqui você pode exibir algum toast/alert futuramente
     }
   };
 
   const disableAdvance = passo === 0 && totalItens === 0;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      {/* HEADER */}
-      <header className="border-b bg-white">
-        <div className="max-w-6xl mx-auto h-16 px-4 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <img
-              src="/logopizzaria.png"
-              alt="Anne & Tom Pizzaria"
-              className="w-10 h-10 object-contain"
-            />
-            <div className="leading-tight">
-              <p className="text-sm font-semibold">Checkout</p>
-              <p className="text-[11px] text-slate-500">
-                Revise e finalize seu pedido
-              </p>
-            </div>
-          </Link>
-
-          <Link
-            to="/cardapio"
-            className="text-xs border rounded-full px-4 py-1.5 hover:bg-slate-100"
-          >
-            ← Voltar ao cardápio
-          </Link>
-        </div>
+    <div className="min-h-screen bg-white text-[#264d3d] flex flex-col">
+      {/* HEADER SIMPLIFICADO MOBILE */}
+      <header className="sticky top-0 z-30 bg-white/95 border-b border-slate-100 shadow-sm px-3 py-2 flex items-center gap-2">
+        <button onClick={() => navigate(-1)} className="rounded-full p-2 bg-slate-100 hover:bg-orange-100 transition">
+          <IconArrowLeft className="w-5 h-5 text-[#ff914d]" />
+        </button>
+        <h1 className="text-base font-bold tracking-tight flex-1 text-center">Checkout</h1>
       </header>
 
       {/* CONTEÚDO */}
-      <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
-        {/* ETAPAS */}
-        <div className="grid grid-cols-4 gap-3 text-center text-xs">
-          {etapas.map((etapa, i) => (
-            <div
-              key={etapa}
-              className={`py-3 rounded-xl border ${
-                i === passo
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white border-slate-200 text-slate-600"
-              }`}
-            >
-              {i + 1}. {etapa}
-            </div>
-          ))}
-        </div>
+      <main className="flex-1 w-full max-w-md mx-auto px-2 py-4 space-y-4">
+        {/* ETAPAS / PROGRESSO */}
+        <section className="rounded-xl border border-orange-100 bg-white px-3 py-3 shadow-sm mb-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-[#ff914d] uppercase tracking-widest">Etapa {passo + 1} de {etapas.length}</span>
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#e63946] text-[11px] font-bold text-white shadow-sm">
+              {totalItens}
+            </span>
+          </div>
+
+          <div className="flex justify-between gap-1">
+            {etapas.map((etapa, i) => {
+              const isActive = i === passo;
+              const isDone = i < passo;
+              const Icon = stepIcons[i] || IconCart;
+
+              return (
+                <div
+                  key={etapa}
+                  className="flex-1 flex flex-col items-center group"
+                >
+                  <div className="relative flex items-center justify-center w-full">
+                    {i > 0 && (
+                      <div
+                        className={`absolute left-0 right-0 h-[2px] rounded-full ${
+                          isDone ? "bg-[#ff914d]" : "bg-[#ff914d]/25"
+                        }`}
+                      />
+                    )}
+                    <div
+                      className={`relative z-10 w-9 h-9 flex items-center justify-center rounded-full border text-xs shadow-sm transition-all duration-200
+                        ${
+                          isActive
+                            ? "bg-[#ff914d] border-[#ff914d] text-white scale-105"
+                            : isDone
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                            : "bg-white border-[#ff914d]/30 text-[#264d3d]/40"
+                        }
+                      `}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <span
+                    className={`mt-2 text-[11px] font-semibold text-center uppercase tracking-wide ${
+                      isActive
+                        ? "text-[#e63946]"
+                        : isDone
+                        ? "text-[#264d3d]"
+                        : "text-[#264d3d]/40"
+                    }`}
+                  >
+                    {etapa}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
 
         {/* PRINCIPAL + RESUMO */}
-        <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)] gap-6">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-6">
+        <section className="w-full">
+          {/* COLUNA PRINCIPAL */}
+          <div className="bg-white border border-orange-100 rounded-xl shadow p-3 space-y-4">
             {passo === 0 && (
               <CarrinhoStep
                 items={items}
@@ -292,52 +463,47 @@ const CheckoutPage = () => {
                 pixLoading={pixLoading}
                 pixError={pixError}
                 onCreatePix={createPixPayment}
+                cardPayment={cardPayment}
+                cardLoading={cardLoading}
+                cardError={cardError}
+                onCreateCard={createCardPayment}
               />
             )}
 
             {/* BOTÕES NAVEGAÇÃO */}
-            <div className="pt-2 border-t border-slate-100 space-y-2">
-              <div className="flex justify-between items-start">
+            <div className="pt-2 border-t border-orange-100 space-y-2">
+              <div className="flex flex-col gap-2">
                 <button
                   onClick={voltar}
                   disabled={passo === 0}
-                  className={`px-5 py-2 rounded-full text-xs border border-slate-300 hover:bg-slate-100 ${
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm border border-slate-200 bg-white text-[#264d3d] hover:bg-orange-50 transition ${
                     passo === 0 ? "opacity-40 cursor-not-allowed" : ""
                   }`}
                 >
-                  {"\u2190 Voltar"}
+                  <IconArrowLeft className="w-4 h-4" />
+                  <span>Voltar</span>
                 </button>
 
                 {passo < 2 && (
-                  <div className="flex flex-col items-end">
-                    <button
-                      onClick={avancar}
-                      disabled={disableAdvance}
-                      className={`px-6 py-2 rounded-full text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 ${
-                        disableAdvance ? "opacity-50 cursor-not-allowed" : ""
-                      }`}
-                    >
-                      {"Avan\u00e7ar \u2192"}
-                      {passo === 0 && totalItens > 0 && (
-                        <span className="ml-1 text-[10px] opacity-80">
-                          ({totalItens} item{totalItens > 1 ? "s" : ""})
-                        </span>
-                      )}
-                    </button>
-                    {disableAdvance && (
-                      <span className="mt-1 text-[10px] text-slate-500">
-                        Adicione itens ao carrinho para continuar.
-                      </span>
-                    )}
-                  </div>
+                  <button
+                    onClick={avancar}
+                    disabled={disableAdvance}
+                    className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold bg-[#ff914d] text-white shadow hover:bg-[#e86d26] transition ${
+                      disableAdvance ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    <span>Continuar</span>
+                    <IconArrowRight className="w-4 h-4" />
+                  </button>
                 )}
 
                 {passo === 2 && (
                   <button
                     onClick={avancar}
-                    className="px-6 py-2 rounded-full text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold bg-[#ff914d] text-white shadow hover:bg-[#e86d26] transition"
                   >
-                    {"Confirmar e ir para pagamento \u2192"}
+                    <span>Ir para pagamento</span>
+                    <IconPayment className="w-5 h-5" />
                   </button>
                 )}
 
@@ -345,52 +511,57 @@ const CheckoutPage = () => {
                   <button
                     onClick={handleEnviarPedido}
                     disabled={!podeEnviar}
-                    className={`px-7 py-3 rounded-full text-xs font-semibold ${
+                    className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition ${
                       podeEnviar
-                        ? "bg-emerald-500 text-slate-900 hover:bg-emerald-400"
-                        : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                        ? "bg-[#264d3d] text-white hover:bg-[#ff914d] hover:text-[#264d3d] shadow"
+                        : "bg-[#264d3d]/15 text-[#264d3d]/45 cursor-not-allowed"
                     }`}
                   >
-                    {enviando ? "Enviando..." : "Enviar Pedido"}
+                    {enviando ? (
+                      <>
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#e63946] border-t-transparent" />
+                        <span>Enviando pedido...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Finalizar pedido</span>
+                        <IconCheck className="w-5 h-5" />
+                      </>
+                    )}
                   </button>
                 )}
               </div>
 
               {checkoutError && (
-                <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                  <span className="flex-1">{checkoutError}</span>
-                  <button
-                    type="button"
-                    onClick={handleEnviarPedido}
-                    disabled={!podeEnviar || enviando}
-                    className={`rounded-full border border-amber-300 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 ${
-                      !podeEnviar || enviando
-                        ? "cursor-not-allowed opacity-60"
-                        : "hover:bg-amber-100"
-                    }`}
-                  >
-                    {enviando ? "Enviando..." : "Tentar novamente"}
-                  </button>
+                <div className="flex items-start gap-2 rounded-lg border border-[#e63946]/30 bg-[#e63946]/8 px-2 py-2 text-xs text-[#a22932]">
+                  <div className="mt-0.5 h-4 w-4 rounded-full border border-[#e63946] flex items-center justify-center text-[10px]">
+                    !
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <p>{checkoutError}</p>
+                    <button
+                      type="button"
+                      onClick={handleEnviarPedido}
+                      disabled={!podeEnviar || enviando}
+                      className={`inline-flex items-center gap-1 rounded-full border border-[#e63946] bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#e63946] ${
+                        !podeEnviar || enviando
+                          ? "cursor-not-allowed opacity-60"
+                          : "hover:bg-[#ffe6e8]"
+                      }`}
+                    >
+                      <span>Tentar novamente</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* RESUMO LATERAL */}
-          <aside className="hidden lg:block">
-            <ResumoLateral
-              items={items}
-              subtotal={subtotal}
-              taxaEntrega={taxaEntrega}
-              desconto={desconto}
-              totalFinal={totalFinal}
-              addItem={addItem}
-            />
-          </aside>
-        </div>
+          {/* RESUMO LATERAL - REMOVIDO NO MOBILE */}
+        </section>
       </main>
 
-      {/* RESUMO MOBILE */}
+      {/* RESUMO MOBILE FIXO */}
       <ResumoMobile items={items} totalFinal={totalFinal} />
     </div>
   );
