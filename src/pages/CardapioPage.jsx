@@ -5,18 +5,96 @@ import { useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext";
 import { useMenuData } from "../hooks/useMenuData";
 import { formatCurrencyBRL } from "../utils/menu";
+import { loadGoogleMaps } from "../utils/googleMaps";
 
 import iconVeggieUrl from "../assets/icons/veggie.svg";
 import iconBestUrl from "../assets/icons/best.svg";
 import iconHotUrl from "../assets/icons/hot.svg";
-
-const WHATSAPP_LINK =
-  "https://wa.me/5511932507007?text=Ol%C3%A1%2C+vim+do+card%C3%A1pio+online+e+preciso+de+ajuda+%F0%9F%8D%95";
+import iconTagUrl from "../assets/icons/tag.svg";
+import DeliverySection from "../components/Cardapio/DeliverySection";
 
 const LOCATION_STORAGE_KEY = "at_delivery_location";
 const ADDRESS_BOOK_STORAGE_KEY = "at_delivery_address_book";
 const DELIVERY_MODE_KEY = "at_delivery_mode";
 const SEARCH_STORAGE_KEY = "at_menu_search";
+const CHECKOUT_CLIENT_STORAGE_KEY = "checkout_cliente";
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+const MOCK_PIZZA_IMAGE_URL =
+  "https://upload.wikimedia.org/wikipedia/commons/a/a3/Eq_it-na_pizza-margherita_sep2005_sml.jpg";
+
+const normalizeTag = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+const toTitleCase = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .split(" ")
+    .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
+    .join(" ");
+
+const TAG_ICON_MAP = {
+  veggie: iconVeggieUrl,
+  vegetariana: iconVeggieUrl,
+  vegana: iconVeggieUrl,
+  picante: iconHotUrl,
+  apimentada: iconHotUrl,
+  "mais pedido": iconBestUrl,
+  "mais pedidos": iconBestUrl,
+  bestseller: iconBestUrl,
+};
+
+const TAG_LABEL_MAP = {
+  veggie: "Veggie",
+  vegetariana: "Vegetariana",
+  vegana: "Vegana",
+  picante: "Picante",
+  apimentada: "Apimentada",
+  "mais pedido": "Mais pedido",
+  "mais pedidos": "Mais pedido",
+  bestseller: "Mais pedido",
+};
+
+const resolveTagMeta = (rawTag) => {
+  const normalized = normalizeTag(rawTag);
+  if (!normalized) {
+    return { label: "", icon: null };
+  }
+  return {
+    label: TAG_LABEL_MAP[normalized] || toTitleCase(normalized),
+    icon: TAG_ICON_MAP[normalized] || iconTagUrl,
+  };
+};
+
+const normalizeAddressLabel = (value) =>
+  String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*,\s*/g, ", ")
+    .trim();
+
+const buildAddressEntry = ({ label, coords, nickname }) => {
+  const cleaned = normalizeAddressLabel(label);
+  const parts = cleaned
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const title = nickname || parts[0] || cleaned;
+  const subtitle = parts.slice(1).join(", ");
+  const now = Date.now();
+
+  return {
+    id: `${now}-${Math.round(Math.random() * 1e6)}`,
+    label: cleaned,
+    title,
+    subtitle,
+    nickname: nickname || "",
+    coords: coords || null,
+    createdAt: now,
+    lastUsedAt: now,
+  };
+};
 
 // ---------- COMPONENTES AUXILIARES ----------
 
@@ -40,153 +118,122 @@ const ProductCard = ({
 
   const badge = product.classificacao || product.tag || product.categoria;
   const badges = product.badges || [];
+  const renderBadge = (rawTag, index) => {
+    const { label, icon } = resolveTagMeta(rawTag);
+    if (!label) return null;
+    return (
+      <span
+        key={`${label}-${index}`}
+        className="rounded-full border border-[#FF914D]/40 bg-[#FF914D]/10 px-2.5 py-1 text-[11px] font-semibold text-[#FF914D] flex items-center gap-1.5"
+      >
+        {icon && (
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/70">
+            <img src={icon} alt={label} className="h-3.5 w-3.5" />
+          </span>
+        )}
+        <span>{label}</span>
+      </span>
+    );
+  };
 
   return (
     <article
-      className="cursor-pointer rounded-3xl border border-slate-100 bg-white px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.04)] transition hover:shadow-lg"
+      className="flex gap-4 cursor-pointer rounded-3xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-200 hover:border-orange-200/80 hover:shadow-lg"
       onClick={onShowDetails}
     >
-      <header className="mb-2 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-            {String(index + 1).padStart(2, "0")} • Pizza
-          </p>
-          <h3 className="mt-0.5 text-[13px] font-semibold text-slate-900">
-            {product.nome || product.name}
-          </h3>
-          {hasDescription && (
-            <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">
-              {product.descricao || product.description}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
-            {formatCurrencyBRL(mainPrice)}
-          </span>
-
-          {/* badges principais sempre visíveis */}
-          {badges.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1 justify-end">
-              {badges.map((b, i) => (
-                <span
-                  key={i}
-                  className="rounded-full border border-[#FF914D]/30 bg-[#FF914D]/10 px-2 py-0.5 text-[10px] font-semibold text-[#FF914D] flex items-center gap-1"
-                >
-                  {b === "Veggie" && <img src={iconVeggieUrl} alt="Veggie" className="w-3 h-3 inline" />}
-                  {b === "Picante" && <img src={iconHotUrl} alt="Picante" className="w-3 h-3 inline" />}
-                  {b === "Mais pedido" && <img src={iconBestUrl} alt="Mais pedido" className="w-3 h-3 inline" />}
-                  <span>{b}</span>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {badge && badges.length === 0 && (
-            <span className="mt-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-              {badge}
-            </span>
-          )}
-
-          {quantityInCart > 0 && (
-            <span className="text-[10px] font-semibold text-emerald-700">
-              {quantityInCart} no carrinho
-            </span>
-          )}
-        </div>
-      </header>
-
-      {ingredientes && ingredientes.length > 0 && (
-        <p className="mb-2 text-[11px] text-slate-500">
-          <span className="font-semibold text-slate-600">Ingredientes: </span>
-          <span>
-            {Array.isArray(ingredientes)
-              ? ingredientes.join(", ")
-              : ingredientes}
-          </span>
-        </p>
-      )}
-
-      <footer className="mt-1 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[10px] text-slate-500">
-          {product.quantidade_sabores && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-[2px]">
-              <span className="text-[12px]">🍕</span>
-              {product.quantidade_sabores} sabores
-            </span>
-          )}
-          {product.tamanho && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-[2px]">
-              <span className="text-[12px]">📏</span>
-              {product.tamanho}
-            </span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenCustomization();
-          }}
-          className="inline-flex items-center gap-1 rounded-full bg-[#FF914D] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-sm transition hover:bg-[#ff7a21] active:scale-[0.97]"
-        >
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/15 text-xs">
-            +
-          </span>
-          Personalizar
-        </button>
-      </footer>
-    </article>
-  );
-};
-
-const QuickActionsBar = ({ cartCount = 0, hasActiveOrder, onRepeatLastOrder }) => {
-  const navigate = useNavigate();
-
-  return (
-    <div className="sticky bottom-3 z-30 mt-6">
-      <div className="mx-auto flex max-w-md items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-3 py-2 shadow-[0_10px_30px_rgba(15,23,42,0.18)] backdrop-blur">
-        <button
-          type="button"
-          onClick={() => window.open(WHATSAPP_LINK, "_blank")}
-          className="inline-flex flex-1 items-center justify-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-white hover:bg-emerald-500"
-        >
-          <span className="text-xs">🧑‍🍳</span>
-          Suporte
-        </button>
-
-        <button
-          type="button"
-          onClick={() => navigate("/checkout")}
-          className="inline-flex items-center justify-center gap-1 rounded-full bg-[#FF914D] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-white hover:bg-[#ff7a21]"
-        >
-          <span className="text-xs">🛒</span>
-          Carrinho
-          {cartCount > 0 && (
-            <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-white/15 px-1 text-[9px] font-bold">
-              {cartCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => navigate("/pedidos")}
-          className="inline-flex items-center justify-center rounded-full bg-slate-100 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 hover:bg-slate-200"
-        >
-          📦
-        </button>
-
-        <button
-          type="button"
-          disabled={!hasActiveOrder}
-          onClick={onRepeatLastOrder}
-          className="inline-flex items-center justify-center rounded-full bg-slate-100 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          🔁
-        </button>
+      <div className="hidden sm:block sm:w-24 sm:h-24 flex-shrink-0">
+        <img
+          src={product.imagem || MOCK_PIZZA_IMAGE_URL}
+          alt={product.nome || product.name}
+          className="w-full h-full object-cover rounded-2xl bg-slate-100"
+        />
       </div>
-    </div>
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              {String(index + 1).padStart(2, "0")} • Pizza
+            </p>
+            <h3 className="mt-1 text-sm font-bold text-slate-900">
+              {product.nome || product.name}
+            </h3>
+            {hasDescription && (
+              <p className="mt-1.5 line-clamp-2 text-xs text-slate-500">
+                {product.descricao || product.description}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col items-end gap-1.5">
+            <span className="rounded-full bg-slate-900 px-3 py-1 text-sm font-bold text-white shadow-md">
+              {formatCurrencyBRL(mainPrice)}
+            </span>
+
+            {badges.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5 justify-end">
+                {badges.map((item, index) => renderBadge(item, index))}
+              </div>
+            )}
+
+            {badge && badges.length === 0 && (
+              <div className="mt-1.5 flex justify-end">
+                {renderBadge(badge, "single") || (
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                    {badge}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {quantityInCart > 0 && (
+              <span className="text-xs font-bold text-emerald-700 mt-1">
+                {quantityInCart} no carrinho
+              </span>
+            )}
+          </div>
+        </header>
+
+        {ingredientes && ingredientes.length > 0 && (
+          <p className="my-2 text-xs text-slate-500">
+            <span className="font-semibold text-slate-600">Ingredientes: </span>
+            <span>
+              {Array.isArray(ingredientes)
+                ? ingredientes.join(", ")
+                : ingredientes}
+            </span>
+          </p>
+        )}
+
+        <footer className="mt-auto pt-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            {product.quantidade_sabores && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1">
+                <span className="text-sm">🍕</span>
+                {product.quantidade_sabores} sabores
+              </span>
+            )}
+            {product.tamanho && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1">
+                <span className="text-sm">📏</span>
+                {product.tamanho}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenCustomization();
+            }}
+            className="inline-flex items-center gap-2 rounded-full bg-[#FF914D] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-md transition-all hover:bg-[#ff7a21] active:scale-[0.98]"
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-base font-light">
+              +
+            </span>
+            Personalizar
+          </button>
+        </footer>
+      </div>
+    </article>
   );
 };
 
@@ -215,13 +262,26 @@ const CardapioPage = () => {
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [currentCoords, setCurrentCoords] = useState(null);
   const [savedAddresses, setSavedAddresses] = useState([]);
+  const [showAllSavedAddresses, setShowAllSavedAddresses] = useState(false);
+  const [addressNickname, setAddressNickname] = useState("");
+  const [saveFeedback, setSaveFeedback] = useState("");
+  const [isEditingCurrentAddress, setIsEditingCurrentAddress] = useState(false);
+  const [editAddressValue, setEditAddressValue] = useState("");
+  const [liveAddressLine, setLiveAddressLine] = useState("");
   const [mapEmbedUrl, setMapEmbedUrl] = useState("");
+
+  const mapContainerRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerRef = useRef(null);
+  const geocoderRef = useRef(null);
+  const mapDragTimerRef = useRef(null);
 
   // estados de customização da pizza (modal)
   const [modalQuantity, setModalQuantity] = useState(1);
   const [modalSelectedFlavors, setModalSelectedFlavors] = useState([]);
   const [modalSelectedCrust, setModalSelectedCrust] = useState("");
   const [modalSelectedExtras, setModalSelectedExtras] = useState([]);
+  const [modalFlavorSearch, setModalFlavorSearch] = useState("");
 
   const menuTopRef = useRef(null);
 
@@ -277,6 +337,13 @@ const CardapioPage = () => {
   }, [pizzas, selectedCategory, search]);
 
   const resultsCount = filteredPizzas.length;
+  const visibleSavedAddresses = useMemo(
+    () =>
+      showAllSavedAddresses
+        ? savedAddresses
+        : savedAddresses.slice(0, 2),
+    [savedAddresses, showAllSavedAddresses]
+  );
 
   // lista de sabores para multi-select (todas as pizzas)
   const flavorOptions = useMemo(
@@ -287,6 +354,16 @@ const CardapioPage = () => {
       })),
     [pizzas]
   );
+
+  const filteredFlavorOptions = useMemo(() => {
+    if (!modalFlavorSearch) {
+      return flavorOptions;
+    }
+    const term = modalFlavorSearch.toLowerCase();
+    return flavorOptions.filter((flavor) =>
+      flavor.nome.toLowerCase().includes(term)
+    );
+  }, [flavorOptions, modalFlavorSearch]);
 
   // ---------- HELPERS DE LOCALIZAÇÃO / MAPA ----------
 
@@ -306,21 +383,60 @@ const CardapioPage = () => {
     if (url) setMapEmbedUrl(url);
   };
 
-  const addAddressToBook = (label, coords) => {
-    if (!label) return;
+  const addAddressToBook = (label, coords, nickname = "") => {
+    const cleanedLabel = normalizeAddressLabel(label);
+    if (!cleanedLabel) return;
 
     setSavedAddresses((prev) => {
-      const exists = prev.some((entry) => entry.label === label);
-      if (exists) return prev;
+      const normalized = cleanedLabel.toLowerCase();
+      const existingIndex = prev.findIndex(
+        (entry) => normalizeAddressLabel(entry.label).toLowerCase() === normalized
+      );
 
-      const next = [
-        ...prev,
-        {
-          id: `${Date.now()}-${prev.length + 1}`,
-          label,
-          coords: coords || null,
-        },
-      ];
+      let next = [...prev];
+      const now = Date.now();
+
+      if (existingIndex >= 0) {
+        const existing = next[existingIndex];
+        const nextNickname = nickname || existing.nickname || "";
+        const fallback = buildAddressEntry({
+          label: cleanedLabel,
+          coords: existing.coords,
+          nickname: nextNickname,
+        });
+
+        next[existingIndex] = {
+          ...existing,
+          label: cleanedLabel,
+          title: nextNickname || existing.title || fallback.title,
+          subtitle: existing.subtitle || fallback.subtitle,
+          nickname: nextNickname,
+          coords: coords || existing.coords || null,
+          lastUsedAt: now,
+        };
+      } else {
+        next = [
+          buildAddressEntry({
+            label: cleanedLabel,
+            coords: coords || null,
+            nickname,
+          }),
+          ...next,
+        ];
+      }
+
+      next = next
+        .map((entry) => ({
+          ...entry,
+          title:
+            entry.title ||
+            buildAddressEntry({ label: entry.label }).title,
+          subtitle:
+            entry.subtitle ||
+            buildAddressEntry({ label: entry.label }).subtitle,
+        }))
+        .sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0))
+        .slice(0, 6);
 
       try {
         localStorage.setItem(ADDRESS_BOOK_STORAGE_KEY, JSON.stringify(next));
@@ -331,6 +447,84 @@ const CardapioPage = () => {
       return next;
     });
   };
+
+  const normalizedCurrentAddress = useMemo(
+    () => normalizeAddressLabel(deliveryAddress || manualAddress),
+    [deliveryAddress, manualAddress]
+  );
+
+  const savedCurrentAddress = useMemo(() => {
+    if (!normalizedCurrentAddress) return null;
+    return (
+      savedAddresses.find(
+        (entry) =>
+          normalizeAddressLabel(entry.label).toLowerCase() ===
+          normalizedCurrentAddress.toLowerCase()
+      ) || null
+    );
+  }, [savedAddresses, normalizedCurrentAddress]);
+
+  const saveCurrentAddress = () => {
+    if (!normalizedCurrentAddress) return;
+    const nickname = addressNickname.trim();
+    addAddressToBook(normalizedCurrentAddress, currentCoords, nickname);
+    setSaveFeedback(
+      savedCurrentAddress
+        ? "Endereco atualizado nos salvos."
+        : "Endereco salvo com sucesso."
+    );
+    setAddressNickname("");
+  };
+
+  const removeSavedAddress = (id) => {
+    if (!id) return;
+    setSavedAddresses((prev) => {
+      const next = prev.filter((entry) => entry.id !== id);
+      try {
+        localStorage.setItem(ADDRESS_BOOK_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const startEditCurrentAddress = () => {
+    if (!normalizedCurrentAddress) return;
+    setEditAddressValue(normalizedCurrentAddress);
+    setIsEditingCurrentAddress(true);
+  };
+
+  const cancelEditCurrentAddress = () => {
+    setIsEditingCurrentAddress(false);
+    setEditAddressValue("");
+  };
+
+  const applyEditCurrentAddress = () => {
+    const updated = normalizeAddressLabel(editAddressValue);
+    if (!updated) return;
+    setLiveAddressLine(updated);
+    setManualAddress(updated);
+    setDeliveryAddress(updated);
+    persistCheckoutAddress(updated);
+    setDeliveryReference("Endereco ajustado");
+    setDeliveryStatus("ok");
+    setDeliveryMessage("Endereco atualizado para calculo da entrega.");
+    addAddressToBook(updated, currentCoords, addressNickname.trim());
+    setIsEditingCurrentAddress(false);
+    setEditAddressValue("");
+  };
+
+  useEffect(() => {
+    if (!saveFeedback) return;
+    const timer = setTimeout(() => setSaveFeedback(""), 2500);
+    return () => clearTimeout(timer);
+  }, [saveFeedback]);
+
+  useEffect(() => {
+    setIsEditingCurrentAddress(false);
+    setEditAddressValue("");
+  }, [normalizedCurrentAddress]);
 
   const reverseGeocode = async (coords) => {
     if (!coords) return null;
@@ -348,6 +542,75 @@ const CardapioPage = () => {
     } catch (error) {
       console.error("[Cardapio] reverse geocode error:", error);
       return null;
+    }
+  };
+
+  const buildStreetLineFromGoogle = (result) => {
+    if (!result) return "";
+    const components = result.address_components || [];
+    const route = components.find((item) => item.types?.includes("route"))
+      ?.long_name;
+    const number = components.find((item) =>
+      item.types?.includes("street_number")
+    )?.long_name;
+    const neighborhood = components.find((item) =>
+      item.types?.includes("sublocality")
+    )?.long_name;
+    const streetLine = [route, number].filter(Boolean).join(", ");
+    if (streetLine && neighborhood) {
+      return `${streetLine} - ${neighborhood}`;
+    }
+    return streetLine || result.formatted_address || "";
+  };
+
+  const reverseGeocodeGoogle = async (coords, google) => {
+    if (!coords || !google?.maps) return null;
+    const geocoder = geocoderRef.current || new google.maps.Geocoder();
+    geocoderRef.current = geocoder;
+    return new Promise((resolve) => {
+      geocoder.geocode({ location: coords }, (results, status) => {
+        if (status === "OK" && results && results[0]) {
+          resolve(results[0]);
+          return;
+        }
+        resolve(null);
+      });
+    });
+  };
+
+  const persistCheckoutAddress = (address) => {
+    if (!address) return;
+    try {
+      const raw = localStorage.getItem(CHECKOUT_CLIENT_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const next = {
+        ...(parsed && typeof parsed === "object" ? parsed : {}),
+        endereco: address,
+      };
+      localStorage.setItem(CHECKOUT_CLIENT_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
+  const updateAddressFromCoords = async (coords, google, shouldSave) => {
+    const result = await reverseGeocodeGoogle(coords, google);
+    if (!result) return;
+    const streetLine = buildStreetLineFromGoogle(result);
+    const formatted = result.formatted_address || streetLine;
+    if (streetLine) {
+      setLiveAddressLine(streetLine);
+    }
+    if (formatted) {
+      setManualAddress(formatted);
+      setDeliveryAddress(formatted);
+      persistCheckoutAddress(formatted);
+    }
+    setDeliveryReference(shouldSave ? "Endereco ajustado" : "Pino ajustado");
+    setDeliveryStatus("ok");
+    setDeliveryMessage("Endereco atualizado pelo mapa.");
+    if (shouldSave && formatted) {
+      addAddressToBook(formatted, coords, "");
     }
   };
 
@@ -422,6 +685,7 @@ const CardapioPage = () => {
     setModalQuantity(1);
     setModalSelectedExtras([]);
     setModalSelectedCrust("sem_borda");
+    setModalFlavorSearch("");
 
     // pré-seleciona o sabor da própria pizza
     if (pizza?.id) {
@@ -493,6 +757,8 @@ const CardapioPage = () => {
       setDeliveryDurationText("~6 minutos");
       setDeliveryReference("Endereço informado");
       setDeliveryAddress(value);
+      setLiveAddressLine(value);
+      persistCheckoutAddress(value);
       addAddressToBook(value, coords || null);
       setDeliveryStatus("ok");
       setDeliveryMessage("Entrega disponível para o endereço informado.");
@@ -536,6 +802,8 @@ const CardapioPage = () => {
 
         setManualAddress(resolvedAddress);
         setDeliveryAddress(resolvedAddress);
+        setLiveAddressLine(resolvedAddress);
+        persistCheckoutAddress(resolvedAddress);
         addAddressToBook(resolvedAddress, coords);
 
         setTimeout(() => {
@@ -558,62 +826,6 @@ const CardapioPage = () => {
     );
   };
 
-  const hasActiveOrder = false; // ajuste depois se tiver rastreio do último pedido
-
-  // ---------- EFFECTS ----------
-
-  useEffect(() => {
-    try {
-      const storedSearch = sessionStorage.getItem(SEARCH_STORAGE_KEY);
-      if (storedSearch) setSearch(storedSearch);
-    } catch {
-      // ignore
-    }
-    try {
-      const storedMode = localStorage.getItem(DELIVERY_MODE_KEY);
-      if (storedMode === "delivery" || storedMode === "pickup") {
-        setDeliveryMode(storedMode);
-      }
-    } catch {
-      // ignore
-    }
-    try {
-      const rawAddresses = localStorage.getItem(ADDRESS_BOOK_STORAGE_KEY);
-      if (rawAddresses) {
-        const parsed = JSON.parse(rawAddresses);
-        if (Array.isArray(parsed)) setSavedAddresses(parsed);
-      }
-    } catch {
-      // ignore
-    }
-    try {
-      const rawLocation = localStorage.getItem(LOCATION_STORAGE_KEY);
-      if (rawLocation) {
-        const coords = JSON.parse(rawLocation);
-        if (coords && coords.lat && coords.lng) {
-          updateMapFromCoords(coords);
-          reverseGeocode(coords).then((addr) => {
-            if (addr) {
-              setManualAddress(addr);
-              setDeliveryAddress(addr);
-              addAddressToBook(addr, coords);
-            }
-          });
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(SEARCH_STORAGE_KEY, search);
-    } catch {
-      // ignore
-    }
-  }, [search]);
-
   useEffect(() => {
     try {
       localStorage.setItem(DELIVERY_MODE_KEY, deliveryMode);
@@ -625,6 +837,88 @@ const CardapioPage = () => {
       setDeliveryMessage("");
     }
   }, [deliveryMode]);
+
+  useEffect(() => {
+    if (!GOOGLE_MAPS_API_KEY || !mapContainerRef.current || !currentCoords) {
+      return;
+    }
+
+    let cancelled = false;
+
+    loadGoogleMaps(GOOGLE_MAPS_API_KEY)
+      .then((google) => {
+        if (cancelled) return;
+        const center = {
+          lat: Number(currentCoords.lat),
+          lng: Number(currentCoords.lng),
+        };
+
+        if (!mapInstanceRef.current) {
+          mapInstanceRef.current = new google.maps.Map(mapContainerRef.current, {
+            center,
+            zoom: 17,
+            disableDefaultUI: true,
+            zoomControl: true,
+            mapTypeControl: false,
+            fullscreenControl: false,
+            streetViewControl: false,
+          });
+        } else {
+          mapInstanceRef.current.setCenter(center);
+        }
+
+        if (!markerRef.current) {
+          markerRef.current = new google.maps.Marker({
+            position: center,
+            map: mapInstanceRef.current,
+            draggable: true,
+          });
+
+          markerRef.current.addListener("drag", () => {
+            const pos = markerRef.current?.getPosition?.();
+            if (!pos) return;
+            const coords = { lat: pos.lat(), lng: pos.lng() };
+            if (mapDragTimerRef.current) {
+              window.clearTimeout(mapDragTimerRef.current);
+            }
+            mapDragTimerRef.current = window.setTimeout(() => {
+              updateAddressFromCoords(coords, google, false);
+            }, 500);
+          });
+
+          markerRef.current.addListener("dragend", () => {
+            const pos = markerRef.current?.getPosition?.();
+            if (!pos) return;
+            const coords = { lat: pos.lat(), lng: pos.lng() };
+            setCurrentCoords(coords);
+            if (mapDragTimerRef.current) {
+              window.clearTimeout(mapDragTimerRef.current);
+            }
+            mapDragTimerRef.current = window.setTimeout(() => {
+              updateAddressFromCoords(coords, google, true);
+            }, 0);
+          });
+        } else {
+          markerRef.current.setPosition(center);
+        }
+
+        if (!liveAddressLine) {
+          updateAddressFromCoords(center, google, false);
+        }
+      })
+      .catch(() => {
+        // ignore map load failure
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    GOOGLE_MAPS_API_KEY,
+    currentCoords?.lat,
+    currentCoords?.lng,
+    liveAddressLine,
+  ]);
 
   useEffect(() => {
     if (!menuTopRef.current) return;
@@ -639,247 +933,54 @@ const CardapioPage = () => {
   return (
     <div className="bg-[#FFF7EC]">
       <div className="mx-auto max-w-5xl px-3 py-4 md:px-6 md:py-6">
-        {/* STATUS DE FUNCIONAMENTO + ENTREGA */}
-        <section className="rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white shadow-md">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-200" />
-                  Aberto agora
-                </span>
-                <span className="text-[11px] text-slate-500">
-                  {horarioAbertura ? horarioAbertura : (
-                    <span className="inline-block h-4 w-32 animate-pulse rounded bg-slate-100 align-middle" />
-                  )}
-                </span>
-              </div>
-              {deliveryStatus === "ok" && (
-                <span className="mt-1 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2 py-[4px] text-[10px] font-semibold text-emerald-700">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  Entrega disponível para sua região
-                </span>
-              )}
-              {deliveryStatus === "error" && (
-                <span className="mt-1 inline-flex items-center gap-2 rounded-full bg-red-50 px-2 py-[4px] text-[10px] font-semibold text-red-700">
-                  <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                  Problema ao validar endereço
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* MODO + BLOCO ENTREGA */}
-          <div className="mt-4 space-y-4 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm">
-            {/* MODO */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-400">
-                  Modo
-                </span>
-                <p className="text-xs text-slate-500">
-                  Escolha se deseja receber em casa ou retirar na pizzaria.
-                </p>
-              </div>
-              <div className="inline-flex rounded-full bg-slate-100 p-1">
-                <button
-                  type="button"
-                  onClick={() => setDeliveryMode("delivery")}
-                  className={`rounded-full px-4 py-1.5 text-[11px] font-semibold transition ${
-                    deliveryMode === "delivery"
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "text-slate-600"
-                  }`}
-                >
-                  Entrega
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDeliveryMode("pickup")}
-                  className={`rounded-full px-4 py-1.5 text-[11px] font-semibold transition ${
-                    deliveryMode === "pickup"
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "text-slate-600"
-                  }`}
-                >
-                  Retirada
-                </button>
-              </div>
-            </div>
-
-            {/* BLOCO ENTREGA */}
-            {deliveryMode === "delivery" && (
-              <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-semibold uppercase tracking-[0.2em] text-slate-400">
-                      Entrega
-                    </span>
-                    <span className="text-slate-500">
-                      Informe sua localização para calcular taxa e tempo.
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                      Raio máximo
-                    </span>
-                    <span className="text-[11px] font-semibold text-slate-700">
-                      15 km
-                    </span>
-                  </div>
-                </div>
-
-                {/* BOTÕES PRINCIPAIS */}
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="button"
-                    onClick={handleUseLocation}
-                    disabled={isRequestingLocation}
-                    className="h-9 w-full rounded-full bg-emerald-600 text-[11px] font-semibold uppercase tracking-wide text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isRequestingLocation
-                      ? "Buscando localização..."
-                      : "Usar minha localização"}
-                  </button>
-
-                  <div className="flex h-9 w-full items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-xs">
-                    <input
-                      type="text"
-                      value={manualAddress}
-                      onChange={(event) =>
-                        setManualAddress(event.target.value)
-                      }
-                      placeholder="Rua, número, bairro ou CEP"
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          handleManualAddressCheck();
-                        }
-                      }}
-                      className="min-w-0 flex-1 bg-transparent text-sm text-slate-600 outline-none placeholder:text-slate-400"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleManualAddressCheck}
-                      className="h-7 shrink-0 rounded-full border border-slate-200 px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Calcular
-                    </button>
-                  </div>
-                </div>
-
-                {/* RESUMO DISTÂNCIA / REFERÊNCIA */}
-                <div className="space-y-1 text-[11px] text-slate-600">
-                  {deliveryDistanceText && (
-                    <p>
-                      <span className="font-semibold">Distância:</span>{" "}
-                      {deliveryDistanceText}
-                      {deliveryDurationText ? ` · ${deliveryDurationText}` : ""}
-                    </p>
-                  )}
-                  {deliveryReference && (
-                    <p>
-                      <span className="font-semibold">Referência:</span>{" "}
-                      {deliveryReference}
-                    </p>
-                  )}
-                </div>
-
-                {/* ENDEREÇOS SALVOS */}
-                {savedAddresses.length > 0 && (
-                  <div className="mt-1 space-y-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
-                      Endereços salvos
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {savedAddresses.map((entry) => (
-                        <button
-                          key={entry.id}
-                          type="button"
-                          onClick={() => {
-                            setManualAddress(entry.label);
-                            setDeliveryAddress(entry.label);
-                            if (entry.coords) {
-                              updateMapFromCoords(entry.coords);
-                            }
-                            setDeliveryDistanceText("~1,8 km");
-                            setDeliveryDurationText("~6 minutos");
-                            setDeliveryReference("Endereço salvo");
-                            setDeliveryStatus("ok");
-                            setDeliveryMessage(
-                              "Entrega disponível para o endereço salvo."
-                            );
-                          }}
-                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50"
-                        >
-                          {entry.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* MAPA */}
-                {mapEmbedUrl && (
-                  <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
-                    <iframe
-                      title="Mapa da entrega"
-                      src={mapEmbedUrl}
-                      loading="lazy"
-                      referrerPolicy="no-referrer-when-downgrade"
-                      className="h-40 w-full border-0"
-                    />
-                    {deliveryAddress && (
-                      <div className="flex items-center justify-between px-3 pb-2 pt-1 text-[10px] text-slate-600">
-                        <span className="truncate">
-                          Entrega para:{" "}
-                          <span className="font-semibold">
-                            {deliveryAddress}
-                          </span>
-                        </span>
-                        {currentCoords && (
-                          <a
-                            href={`https://www.google.com/maps/search/?api=1&query=${currentCoords.lat},${currentCoords.lng}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 hover:text-emerald-600"
-                          >
-                            Ver mapa ampliado
-                          </a>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* MENSAGEM DE STATUS */}
-                <div className="pt-1 text-[11px] font-semibold">
-                  {deliveryStatus === "loading" && (
-                    <p className="text-slate-500">{deliveryMessage}</p>
-                  )}
-                  {deliveryStatus === "ok" && (
-                    <p className="text-emerald-600">{deliveryMessage}</p>
-                  )}
-                  {deliveryStatus === "error" && (
-                    <p className="text-red-600">{deliveryMessage}</p>
-                  )}
-                  {deliveryStatus === "idle" && !deliveryMessage && (
-                    <p className="text-slate-500">
-                      Informe um endereço ou permita a localização para validar
-                      a entrega.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {deliveryMode === "pickup" && (
-              <p className="text-[11px] font-semibold text-emerald-600">
-                Retirada na loja sem taxa de entrega.
-              </p>
-            )}
-          </div>
-        </section>
+        <DeliverySection
+          horarioAbertura={horarioAbertura}
+          deliveryStatus={deliveryStatus}
+          deliveryMode={deliveryMode}
+          setDeliveryMode={setDeliveryMode}
+          isRequestingLocation={isRequestingLocation}
+          manualAddress={manualAddress}
+          setManualAddress={setManualAddress}
+          handleUseLocation={handleUseLocation}
+          handleManualAddressCheck={handleManualAddressCheck}
+          deliveryDistanceText={deliveryDistanceText}
+          deliveryDurationText={deliveryDurationText}
+          deliveryReference={deliveryReference}
+          normalizedCurrentAddress={normalizedCurrentAddress}
+          startEditCurrentAddress={startEditCurrentAddress}
+          saveCurrentAddress={saveCurrentAddress}
+          savedCurrentAddress={savedCurrentAddress}
+          addressNickname={addressNickname}
+          setAddressNickname={setAddressNickname}
+          isEditingCurrentAddress={isEditingCurrentAddress}
+          editAddressValue={editAddressValue}
+          setEditAddressValue={setEditAddressValue}
+          applyEditCurrentAddress={applyEditCurrentAddress}
+          cancelEditCurrentAddress={cancelEditCurrentAddress}
+          saveFeedback={saveFeedback}
+          savedAddresses={savedAddresses}
+          visibleSavedAddresses={visibleSavedAddresses}
+          removeSavedAddress={removeSavedAddress}
+          showAllSavedAddresses={showAllSavedAddresses}
+          setShowAllSavedAddresses={setShowAllSavedAddresses}
+          updateMapFromCoords={updateMapFromCoords}
+          setDeliveryDistanceText={setDeliveryDistanceText}
+          setDeliveryDurationText={setDeliveryDurationText}
+          setDeliveryReference={setDeliveryReference}
+          setDeliveryStatus={setDeliveryStatus}
+          setDeliveryMessage={setDeliveryMessage}
+          addAddressToBook={addAddressToBook}
+          setDeliveryAddress={setDeliveryAddress}
+          setLiveAddressLine={setLiveAddressLine}
+          persistCheckoutAddress={persistCheckoutAddress}
+          mapEmbedUrl={mapEmbedUrl}
+          currentCoords={currentCoords}
+          GOOGLE_MAPS_API_KEY={GOOGLE_MAPS_API_KEY}
+          mapContainerRef={mapContainerRef}
+          deliveryAddress={deliveryAddress}
+          liveAddressLine={liveAddressLine}
+          deliveryMessage={deliveryMessage}
+        />
 
         {/* CONTROLES DE BUSCA E FILTRO */}
         <section
@@ -1000,12 +1101,8 @@ const CardapioPage = () => {
           </div>
         </section>
 
-        {/* BARRA DE AÇÕES RÁPIDAS */}
-        <QuickActionsBar
-          cartCount={cartCount}
-          hasActiveOrder={hasActiveOrder}
-          onRepeatLastOrder={() => {}}
-        />
+        {/* BARRA DE AÇÕES RÁPIDAS (REMOVIDA) */}
+        {/* A navegação principal agora centraliza o acesso ao carrinho e outras seções. */}
 
         {/* Toast mais discreto */}
         {toast &&

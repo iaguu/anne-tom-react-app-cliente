@@ -1,6 +1,6 @@
 {
   "name": "app-annetom-webview",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Aplicação React (Vite) para WebView Android - app.annetom.com - Pedidos, login cliente, cardápio, carrinho, rastreamento, fidelidade e roleta de desconto.",
   "author": "Iago Barreto",

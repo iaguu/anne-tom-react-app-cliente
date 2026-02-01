@@ -180,6 +180,7 @@ const stepIcons = [IconCart, IconData, IconReview, IconPayment];
 const CheckoutPage = () => {
   const navigate = useNavigate();
   const [checkoutError, setCheckoutError] = useState("");
+  const PENDING_CARD_ORDER_KEY = "pending_card_order";
 
   const {
     // cart
@@ -220,6 +221,7 @@ const CheckoutPage = () => {
     cardLoading,
     cardError,
     createCardPayment,
+    cardCheckoutUrl,
     // totais
     subtotal,
     taxaEntrega,
@@ -233,6 +235,7 @@ const CheckoutPage = () => {
     distanceKm,
     distanceFee,
     deliveryFeeLabel,
+    podeAvancarDados,
     // cart actions
     updateQuantity,
     removeItem,
@@ -246,6 +249,58 @@ const CheckoutPage = () => {
     setCheckoutError("");
 
     try {
+      if (pagamento === "cartao") {
+        const resolveCardUrl = (payment) =>
+          payment?.checkoutUrl ||
+          payment?.metadata?.providerRaw?.url ||
+          payment?.metadata?.url ||
+          payment?.url ||
+          "";
+
+        let checkoutUrl = cardCheckoutUrl || resolveCardUrl(cardPayment);
+        let cardSnapshot = cardPayment;
+
+        if (!checkoutUrl) {
+          const createdPayment = await createCardPayment();
+          cardSnapshot = createdPayment || cardSnapshot;
+          checkoutUrl = resolveCardUrl(createdPayment);
+        }
+
+        if (!checkoutUrl) {
+          console.warn(
+            "[CheckoutPage] Link de pagamento do cartao indisponivel."
+          );
+          setCheckoutError(
+            "Nao foi possivel gerar o link de pagamento. Tente novamente."
+          );
+          return;
+        }
+
+        const pendingPayload = {
+          createdAt: Date.now(),
+          items,
+          dados,
+          subtotal,
+          taxaEntrega,
+          desconto,
+          totalFinal,
+          pagamento,
+          cardPayment: cardSnapshot,
+        };
+
+        try {
+          localStorage.setItem(
+            PENDING_CARD_ORDER_KEY,
+            JSON.stringify(pendingPayload)
+          );
+        } catch (e) {
+          console.warn("[CheckoutPage] Falha ao salvar pendingCardOrder:", e);
+        }
+
+        window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+
       const result = await enviarPedido();
 
       console.log("[CheckoutPage] resultado enviarPedido:", result);
@@ -332,7 +387,43 @@ const CheckoutPage = () => {
     }
   };
 
-  const disableAdvance = passo === 0 && totalItens === 0;
+  const disableAdvance =
+    (passo === 0 && totalItens === 0) ||
+    (passo === 1 && !podeAvancarDados);
+
+  const phoneDigits = String(dados.telefone || "").replace(/\D/g, "");
+  const missingChecklist = [];
+  if (passo === 1) {
+    if (tipoCliente === "auto") {
+      missingChecklist.push("Escolha se ja e cliente ou primeira vez.");
+    }
+    if (phoneDigits.length < 10) {
+      missingChecklist.push("Informe o WhatsApp com DDD.");
+    }
+    if (!dados.nome.trim()) {
+      missingChecklist.push("Informe o nome completo.");
+    }
+    if (!dados.retirada) {
+      if (String(dados.cep || "").replace(/\D/g, "").length !== 8) {
+        missingChecklist.push("Informe um CEP valido.");
+      }
+      if (!dados.endereco.trim()) {
+        missingChecklist.push("Informe o endereco completo.");
+      }
+      if (!dados.bairro.trim()) {
+        missingChecklist.push("Informe o bairro.");
+      }
+      if (deliveryEtaLoading) {
+        missingChecklist.push("Calculando tempo de entrega...");
+      }
+      if (deliveryEtaError) {
+        missingChecklist.push("Nao foi possivel calcular a entrega.");
+      }
+      if (distanceFee == null && !deliveryEtaLoading && !deliveryEtaError) {
+        missingChecklist.push("Calcule a distancia da entrega.");
+      }
+    }
+  }
 
   return (
     <div className="min-h-screen bg-white text-[#264d3d] flex flex-col">
@@ -349,9 +440,8 @@ const CheckoutPage = () => {
         {/* ETAPAS / PROGRESSO */}
         <section className="rounded-xl border border-orange-100 bg-white px-3 py-3 shadow-sm mb-2">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-[#ff914d] uppercase tracking-widest">Etapa {passo + 1} de {etapas.length}</span>
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#e63946] text-[11px] font-bold text-white shadow-sm">
-              {totalItens}
+            <span className="text-xs font-semibold text-[#ff914d] uppercase tracking-widest">
+              Etapa {passo + 1} de {etapas.length}
             </span>
           </div>
 
@@ -463,10 +553,9 @@ const CheckoutPage = () => {
                 pixLoading={pixLoading}
                 pixError={pixError}
                 onCreatePix={createPixPayment}
-                cardPayment={cardPayment}
                 cardLoading={cardLoading}
                 cardError={cardError}
-                onCreateCard={createCardPayment}
+                cardCheckoutUrl={cardCheckoutUrl}
               />
             )}
 
@@ -495,6 +584,27 @@ const CheckoutPage = () => {
                     <span>Continuar</span>
                     <IconArrowRight className="w-4 h-4" />
                   </button>
+                )}
+
+                {passo === 1 && missingChecklist.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      Falta para continuar
+                    </p>
+                    <ul className="mt-1 space-y-1">
+                      {missingChecklist.slice(0, 3).map((item) => (
+                        <li key={item} className="flex items-start gap-2">
+                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-400" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {missingChecklist.length > 3 && (
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        +{missingChecklist.length - 3} itens pendentes
+                      </p>
+                    )}
+                  </div>
                 )}
 
                 {passo === 2 && (

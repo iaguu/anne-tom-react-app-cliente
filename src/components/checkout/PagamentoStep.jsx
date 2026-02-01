@@ -17,8 +17,7 @@ const PagamentoStep = ({
   // Cartão (AXIONEPAY) - opcionais
   cardLoading,
   cardError,
-  cardPayment,
-  onCreateCard,
+  cardCheckoutUrl,
 }) => {
   // ======================
   // PIX
@@ -111,22 +110,9 @@ const PagamentoStep = ({
   };
 
   // ======================
-  // CARTÃO (AXIONEPAY) - Redirecionamento
+  // CARTÃO (AXIONEPAY)
   // ======================
-  const [cardRedirecting, setCardRedirecting] = useState(false);
-  const handleCreateCard = async () => {
-    if (!onCreateCard) return;
-    setCardRedirecting(true);
-    try {
-      const result = await onCreateCard();
-      // Espera que a API retorne { ... , metadata: { providerRaw: { url: "..." } } }
-      const url = result?.metadata?.providerRaw?.url;
-      if (url) {
-        window.location.href = url;
-      }
-    } catch {}
-    setCardRedirecting(false);
-  };
+  const cardReady = Boolean(cardCheckoutUrl);
 
   // ======================
   // RENDER
@@ -309,19 +295,28 @@ const PagamentoStep = ({
           <div className="flex flex-col items-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
               <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
-              Cartão de Crédito
+              Cartao de credito
             </div>
-            <p className="text-[12px] text-blue-900 text-center font-semibold tracking-wide">
-              Pagamento 100% seguro: você será redirecionado para o ambiente protegido da <span className="font-bold text-blue-700">AxionPAY</span>.
-            </p>
-            <button
-              type="button"
-              onClick={handleCreateCard}
-              disabled={cardLoading || cardRedirecting}
-              className="rounded-full border border-slate-200 px-6 py-2 text-[12px] font-bold uppercase tracking-wide text-blue-700 bg-white transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 shadow"
+            <div
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-[10px] font-semibold ${
+                cardLoading
+                  ? "bg-amber-50 text-amber-700"
+                  : cardReady
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-slate-100 text-slate-600"
+              }`}
             >
-              {cardLoading || cardRedirecting ? "Redirecionando..." : "Pagar Agora"}
-            </button>
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  cardLoading
+                    ? "bg-amber-400 animate-pulse"
+                    : cardReady
+                    ? "bg-emerald-500"
+                    : "bg-slate-400"
+                }`}
+              />
+              Ao finalizar o pedido, o cliente sera redirecionado para o pagamento seguro.
+            </div>
             {cardError && (
               <p className="text-[12px] text-rose-700 font-semibold mt-2">{cardError}</p>
             )}

@@ -1,44 +1,26 @@
 // src/api/server.js
 import axios from "axios";
 
-const resolveBaseUrl = () => {
-  const envValue = import.meta.env.VITE_AT_API_BASE_URL;
-  if (envValue === "same-origin") {
-    if (typeof window !== "undefined" && window.location?.origin) {
-      return window.location.origin;
-    }
-    return "";
-  }
-  return envValue || "https://api.annetom.com";
+const apiKey = import.meta.env.VITE_AT_API_KEY;
+const publicToken = import.meta.env.VITE_PUBLIC_API_TOKEN;
+const authToken = apiKey || publicToken;
+const axionApiKey = import.meta.env.VITE_AXIONPAY_API_KEY || "change-me-public";
+const axionPayTag = import.meta.env.VITE_AXIONPAY_PAY_TAG || "user-test";
+
+const atBaseUrl = import.meta.env.VITE_AT_API_BASE_URL || "https://pdv.axionenterprise.cloud/annetom";
+const normalizeBaseUrl = (base) => String(base || "").replace(/\/+$/, "");
+const baseDomainUrl = normalizeBaseUrl(atBaseUrl).replace(/\/api$/, "");
+const buildAxionProxyUrl = (base) => {
+  const normalized = normalizeBaseUrl(base);
+  if (!normalized) return "";
+  return normalized.endsWith("/api")
+    ? `${normalized}/axionpay`
+    : `${normalized}/api/axionpay`;
 };
-
-const BASE_URL = resolveBaseUrl();
-
-const API_KEY =
-  import.meta.env.VITE_PUBLIC_API_TOKEN ||
-  import.meta.env.VITE_AT_API_KEY ||
-  "change-me-public";
-
-const AXION_API_KEY =
-  import.meta.env.VITE_AXIONPAY_API_KEY ||
-  import.meta.env.VITE_AXION_PAY_API_KEY ||
-  "";
-const AXION_BEARER =
-  import.meta.env.VITE_AXIONPAY_BEARER ||
-  import.meta.env.VITE_AXION_PAY_BEARER ||
-  "";
-const AXION_PIX_PATH =
-  import.meta.env.VITE_AXIONPAY_PIX_PATH ||
-  import.meta.env.VITE_AXION_PAY_PIX_PATH ||
-  "/payments/pix";
-
-const AXION_CARD_PATH =
-  import.meta.env.VITE_AXIONPAY_CARD_PATH ||
-  import.meta.env.VITE_AXION_PAY_CARD_PATH ||
-  "/payments/card";
-
-const baseUrl = BASE_URL;
-const xApiKey = API_KEY;
+const axionBaseUrl =
+  import.meta.env.VITE_AXIONPAY_BASE_URL ||
+  buildAxionProxyUrl(atBaseUrl) ||
+  "https://pay.axionenterprise.cloud";
 
 const toResponse = (response) => ({
   ok: response.status >= 200 && response.status < 300,
@@ -84,11 +66,24 @@ export const serverInstance = {
   baseDomain: {
     instance: axios.create({
       timeout: 15000,
-      baseURL: baseUrl,
+      baseURL: baseDomainUrl,
       validateStatus: () => true,
       headers: {
         Accept: "application/json",
-        ...(xApiKey ? { "x-api-key": xApiKey } : {}),
+        "ngrok-skip-browser-warning": "true",
+        ...(authToken ? { "x-api-key": authToken } : {}),
+      },
+    }),
+  },
+  paymentsDomain: {
+    instance: axios.create({
+      timeout: 15000,
+      baseURL: axionBaseUrl,
+      validateStatus: () => true,
+      headers: {
+        Accept: "application/json",
+        "x-api-key": axionApiKey,
+        "pay-tag": axionPayTag,
       },
     }),
   },
@@ -97,7 +92,7 @@ export const serverInstance = {
 const fetchStatus = async (id) => {
   try {
     const response = await serverInstance.baseDomain.instance.get(
-      `/motoboy/pedido/${encodeURIComponent(id)}`
+      `/api/motoboy/pedido/${encodeURIComponent(id)}`
     );
     return toResponse(response);
   } catch (error) {
@@ -173,16 +168,13 @@ const confirmDelivery = async (orderId) => {
 const createPixPayment = async (params = {}, idempotencyKey) => {
   try {
     const payload = normalizePayload(params);
-    const headers = {
-      ...(AXION_API_KEY ? { "x-api-key": AXION_API_KEY } : {}),
-      ...(AXION_BEARER ? { Authorization: `Bearer ${AXION_BEARER}` } : {}),
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-    };
-    const response = await serverInstance.baseDomain.instance.post(
-      AXION_PIX_PATH,
+    const response = await serverInstance.paymentsDomain.instance.post(
+      "/payments/pix",
       payload,
       {
-        headers: Object.keys(headers).length ? headers : undefined,
+        headers: idempotencyKey
+          ? { "Idempotency-Key": idempotencyKey }
+          : undefined,
       }
     );
     return toResponse(response);
@@ -195,16 +187,13 @@ const createPixPayment = async (params = {}, idempotencyKey) => {
 const createCardPayment = async (params = {}, idempotencyKey) => {
   try {
     const payload = normalizePayload(params);
-    const headers = {
-      ...(AXION_API_KEY ? { "x-api-key": AXION_API_KEY } : {}),
-      ...(AXION_BEARER ? { Authorization: `Bearer ${AXION_BEARER}` } : {}),
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-    };
-    const response = await serverInstance.baseDomain.instance.post(
-      AXION_CARD_PATH,
+    const response = await serverInstance.paymentsDomain.instance.post(
+      "/payments/card",
       payload,
       {
-        headers: Object.keys(headers).length ? headers : undefined,
+        headers: idempotencyKey
+          ? { "Idempotency-Key": idempotencyKey }
+          : undefined,
       }
     );
     return toResponse(response);

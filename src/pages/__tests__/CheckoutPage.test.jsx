@@ -65,11 +65,11 @@ describe("CheckoutPage", () => {
 
     renderCheckout();
 
-    const advanceButton = screen.getByRole("button", { name: /avan\u00e7ar/i });
+    const advanceButton = screen.getByRole("button", {
+      name: /continuar/i,
+    });
     expect(advanceButton).toBeDisabled();
-    expect(
-      screen.getByText(/adicione itens ao carrinho para continuar/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/seu carrinho/i)).toBeInTheDocument();
   });
 
   it("shows a retry CTA when enviarPedido fails", async () => {
@@ -84,7 +84,7 @@ describe("CheckoutPage", () => {
 
     renderCheckout();
 
-    fireEvent.click(screen.getByRole("button", { name: /enviar pedido/i }));
+    fireEvent.click(screen.getByRole("button", { name: /finalizar pedido/i }));
 
     expect(
       await screen.findByRole("button", { name: /tentar novamente/i })

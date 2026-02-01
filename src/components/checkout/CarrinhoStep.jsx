@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 const CarrinhoStep = ({ items, updateQuantity, removeItem }) => {
   const navigate = useNavigate();
+  const [openDetails, setOpenDetails] = React.useState({});
   const flavorPalette = [
     "bg-emerald-100 text-emerald-800",
     "bg-amber-100 text-amber-800",
@@ -23,6 +24,8 @@ const CarrinhoStep = ({ items, updateQuantity, removeItem }) => {
   return (
     <div className="space-y-4">
       {items.map((item) => {
+        const itemKey = `${item.id}-${item.tamanho}`;
+        const detailsOpen = Boolean(openDetails[itemKey]);
         const flavorList = Array.isArray(item.sabores)
           ? item.sabores
           : item?.nome?.includes(" / ")
@@ -33,7 +36,7 @@ const CarrinhoStep = ({ items, updateQuantity, removeItem }) => {
 
         return (
           <div
-            key={`${item.id}-${item.tamanho}`}
+            key={itemKey}
             className="flex justify-between items-center p-4 bg-slate-50 border border-slate-200 rounded-xl"
           >
             <div className="space-y-1">
@@ -41,7 +44,7 @@ const CarrinhoStep = ({ items, updateQuantity, removeItem }) => {
                 {item.quantidade}x {item.nome}
               </p>
               <p className="text-[12px] text-slate-500">{item.tamanho}</p>
-              {flavorList.length > 1 && (
+              {detailsOpen && flavorList.length > 1 && (
                 <div className="flex flex-wrap gap-1">
                   {flavorList.map((flavor, index) => (
                     <span
@@ -55,7 +58,7 @@ const CarrinhoStep = ({ items, updateQuantity, removeItem }) => {
                   ))}
                 </div>
               )}
-              {Array.isArray(item.extras) && item.extras.length > 0 && (
+              {detailsOpen && Array.isArray(item.extras) && item.extras.length > 0 && (
                 <p className="text-[11px] text-slate-500">
                   Adicionais: {item.extras.join(", ")}
                 </p>
@@ -81,6 +84,17 @@ const CarrinhoStep = ({ items, updateQuantity, removeItem }) => {
                 }
                 className="w-16 px-2 py-1 rounded border border-slate-300 text-right text-xs bg-white"
               />
+              <button
+                onClick={() =>
+                  setOpenDetails((prev) => ({
+                    ...prev,
+                    [itemKey]: !prev[itemKey],
+                  }))
+                }
+                className="text-[11px] text-slate-500 hover:text-slate-700"
+              >
+                {detailsOpen ? "Ocultar" : "Detalhes"}
+              </button>
               <button
                 onClick={() =>
                   navigate("/cardapio", {

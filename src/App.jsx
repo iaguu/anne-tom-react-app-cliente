@@ -1,12 +1,6 @@
 ﻿// src/App.jsx
 import React from "react";
-import {
-  Routes,
-  Route,
-  Navigate,
-  useLocation,
-  Link,
-} from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, Link } from "react-router-dom";
 import { CartProvider, useCart } from "./context/CartContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 
@@ -100,24 +94,9 @@ const IconCartTab = ({ className }) => (
 
 // Abas principais
 const tabs = [
-  {
-    to: "/",
-    label: "Cardápio",
-    icon: IconPizza,
-    match: ["/", "/cardapio"],
-  },
-  {
-    to: "/pedidos",
-    label: "Meus pedidos",
-    icon: IconOrders,
-    match: ["/pedidos", "/rastreamento"],
-  },
-  {
-    to: "/checkout",
-    label: "Carrinho",
-    icon: IconCartTab,
-    match: ["/checkout"],
-  },
+  { to: "/", label: "Cardapio", icon: IconPizza, match: ["/", "/cardapio"] },
+  { to: "/pedidos", label: "Pedidos", icon: IconOrders, match: ["/pedidos", "/rastreamento"] },
+  { to: "/checkout", label: "Carrinho", icon: IconCartTab, match: ["/checkout"] },
 ];
 
 // Rota protegida por autenticação
@@ -135,104 +114,95 @@ const ProtectedRoute = ({ children }) => {
 // Layout principal do app
 const AppLayout = ({ children }) => {
   const location = useLocation();
+  const activePath = location.pathname;
+
+  // Hooks aqui para evitar variáveis soltas dentro do JSX (e garantir render consistente)
+  const { totalItems = 0 } = useCart() || {};
+  const { customer } = useAuth() || {};
 
   // Layout específico para tela de login
-  if (location.pathname === "/login") {
+  if (activePath === "/login") {
     return (
-      <div className="min-h-screen bg-[#FFF7EC] flex items-center justify-center px-4">
-        <div className="w-full max-w-md bg-white border border-orange-100 rounded-2xl shadow-xl p-6">
-          {children}
-        </div>
+      <div className="min-h-screen bg-[#FFF7EC] flex flex-col">
+        <main className="flex-1 w-full max-w-5xl mx-auto pt-6 pb-8 px-2 md:px-6">
+          <div className="w-full rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+            {children}
+          </div>
+        </main>
       </div>
     );
   }
 
-  const activePath = location.pathname;
-  const { customer, logout } = useAuth();
-  const { items } = useCart();
-
-  const totalItems = items.reduce(
-    (acc, item) => acc + Number(item.quantidade || item.quantity || 0),
-    0
-  );
-
   return (
     <div className="min-h-screen bg-[#FFF7EC] flex flex-col">
-      {/* TOP BAR FIXA */}
+      {/* TOP BAR */}
+      <header className="inset-x-0 top-0 z-40 bg-[#FFF7EC]">
+        <div className="mx-auto max-w-5xl px-4 pt-4 pb-3 md:px-6">
+          {/* CARD SUPERIOR */}
+          <div className="rounded-2xl bg-white border border-orange-100 shadow-md px-4 py-3">
+            <div className="flex items-start justify-between gap-4">
+              {/* LADO ESQUERDO */}
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 rounded-full bg-[#264D3D] flex items-center justify-center text-white shadow">
+                  <svg className="h-4 w-4 text-amber-100" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M3.5 6L12 3L20.5 6L12 21L3.5 6Z"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </div>
 
-<header className="fixed inset-x-0 top-0 z-40 bg-[#FFF7EC]/90 backdrop-blur">
-  <div className="mx-auto max-w-5xl px-3 pt-3 pb-2">
-    
-    {/* CARD SUPERIOR */}
-    <div className="rounded-2xl bg-white border border-orange-100 shadow-md px-3 py-2.5">
-      <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col leading-tight">
+                  <p className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-[#264D3D]">
+                    Anne & Tom • Delivery
+                  </p>
+                  <p className="text-[10px] text-neutral-500 hidden md:block">
+                    Olá, {customer?.nome || "cliente"} — acompanhe seu pedido.
+                  </p>
+                </div>
+              </div>
 
-        {/* LADO ESQUERDO */}
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-[#264D3D] flex items-center justify-center text-white shadow">
-            <svg className="h-4 w-4 text-amber-100" viewBox="0 0 24 24" fill="none">
-              <path d="M3.5 6L12 3L20.5 6L12 21L3.5 6Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
+              {/* LADO DIREITO (removido para simplificar a interface mobile) */}
+            </div>
           </div>
 
-          <div className="flex flex-col leading-tight">
-            <p className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-[#264D3D]">
-              Anne & Tom • Delivery
-            </p>
-            <p className="text-[10px] text-neutral-500">
-              Olá, {customer?.nome || "cliente"} — acompanhe seu pedido.
-            </p>
-          </div>
+          {/* NAV / TABS */}
+          <nav className="mt-3 grid grid-cols-3 gap-3 rounded-2xl bg-white px-3 py-2 border border-neutral-200 shadow-sm">
+            {tabs.map((tab) => {
+              const isActive = tab.match.some((m) =>
+                m === "/" ? activePath === "/" : activePath.startsWith(m)
+              );
+              const Icon = tab.icon;
+              const showBadge = tab.to === "/checkout" && totalItems > 0;
+
+              return (
+                <Link
+                  key={tab.to}
+                  to={tab.to}
+                  className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold transition-all ${
+                    isActive
+                      ? "bg-[#FF914D] text-white shadow"
+                      : "bg-transparent text-[#264D3D] hover:bg-[#FFF7F0]"
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? "text-white" : "text-[#264D3D]"}`} />
+                  {tab.label}
+                  {showBadge && (
+                    <span className="ml-1 h-4 min-w-[16px] flex items-center justify-center rounded-full bg-[#E63946] px-1 text-[9px] font-bold text-white">
+                      {totalItems}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
+      </header>
 
-        {/* LADO DIREITO */}
-        <div className="flex flex-col items-end gap-1">
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-[2px] border border-emerald-100 text-[10px] text-emerald-700">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            Aberto hoje
-          </span>
-
-          <span className="text-[10px] text-neutral-600">18:00 - 23:00</span>
-
-        </div>
-
-      </div>
-    </div>
-
-    {/* NAV / TABS */}
-    <nav className="mt-2 grid grid-cols-3 gap-2 rounded-xl bg-white px-2 py-1 border border-neutral-200 shadow-sm">
-      {tabs.map((tab) => {
-        const isActive = tab.match.some((m) => activePath.startsWith(m));
-        const Icon = tab.icon;
-        const showBadge = tab.to === "/checkout" && totalItems > 0;
-        
-        return (
-          <Link
-            key={tab.to}
-            to={tab.to}
-            className={`flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold border transition-all
-              ${isActive 
-                ? "bg-[#FF914D] text-white border-[#FF914D] shadow" 
-                : "bg-white text-[#264D3D] border-neutral-200 hover:bg-[#FFF7F0]"}`
-            }
-          >
-            <Icon className={`w-3.5 h-3.5 ${isActive ? "text-white" : "text-[#264D3D]"}`} />
-            {tab.label}
-            {showBadge && (
-              <span className="ml-1 h-4 min-w-[16px] flex items-center justify-center rounded-full bg-[#E63946] px-1 text-[9px] font-bold text-white">
-                {totalItems}
-              </span>
-            )}
-          </Link>
-        );
-      })}
-    </nav>
-
-  </div>
-</header>
-
-{/* CONTEÚDO PRINCIPAL AJUSTADO PARA O NOVO TAMANHO */}
-<main className="flex-1 w-full max-w-5xl mx-auto pt-32 pb-6 px-2 md:px-6">
+      {/* CONTEÚDO PRINCIPAL */}
+      <main className="flex-1 w-full max-w-5xl mx-auto pt-6 pb-8 px-2 md:px-6">
         <div className="w-full rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
           {children}
         </div>
@@ -242,64 +212,69 @@ const AppLayout = ({ children }) => {
 };
 
 // Rotas principais da aplicação
-const AppRoutes = () => {
-  return (
-    <AppLayout>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <CardapioPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/cardapio"
-          element={
-            <ProtectedRoute>
-              <CardapioPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/checkout"
-          element={
-            <ProtectedRoute>
-              <CheckoutPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/pedidos"
-          element={
-            <ProtectedRoute>
-              <OrdersPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/confirmacao"
-          element={
-            <ProtectedRoute>
-              <OrderConfirmationPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/rastreamento"
-          element={
-            <ProtectedRoute>
-              <OrderConfirmationPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AppLayout>
-  );
-};
+const AppRoutes = () => (
+  <AppLayout>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <CardapioPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/cardapio"
+        element={
+          <ProtectedRoute>
+            <CardapioPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/checkout"
+        element={
+          <ProtectedRoute>
+            <CheckoutPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/pedidos"
+        element={
+          <ProtectedRoute>
+            <OrdersPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/confirmacao"
+        element={
+          <ProtectedRoute>
+            <OrderConfirmationPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/rastreamento"
+        element={
+          <ProtectedRoute>
+            <OrderConfirmationPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  </AppLayout>
+);
 
 // Root component
 const App = () => (

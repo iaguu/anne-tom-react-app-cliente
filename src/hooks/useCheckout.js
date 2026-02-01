@@ -10,14 +10,51 @@ import { getDistanceMatrix } from "../utils/googleMaps";
 
 const DISTANCE_MATRIX_API_KEY =
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
-const API_KEY = import.meta.env.VITE_API_KEY || "";
 const DELIVERY_ORIGIN =
   import.meta.env.VITE_DELIVERY_ORIGIN ||
   "Pizzaria Anne & Tom, Alto de Santana, Sao Paulo";
 
-// Endpoints de pagamento
-const AXIONPAY_PIX_URL = "http://api.annetom.com/api/axionpay/pix";
-const AXIONPAY_CARD_URL = "http://api.annetom.com/api/axionpay/card";
+const PAYMENT_SESSION_TTL_MS = 15 * 60 * 1000; // 15 minutos
+const PIX_SESSION_KEY = "axionpay_pix_session";
+const CARD_SESSION_KEY = "axionpay_card_session";
+
+const loadPaymentFromSession = (key, expectedTotal) => {
+  try {
+    if (typeof sessionStorage === "undefined") return null;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    if (!saved || typeof saved !== "object") return null;
+    const createdAt = saved.createdAt || 0;
+    const total = saved.total;
+    if (!createdAt || typeof total !== "number") return null;
+
+    if (Date.now() - createdAt > PAYMENT_SESSION_TTL_MS) {
+      sessionStorage.removeItem(key);
+      return null;
+    }
+
+    if (Math.abs((expectedTotal || 0) - total) > 0.01) return null;
+
+    return saved.payment || null;
+  } catch {
+    return null;
+  }
+};
+
+const savePaymentToSession = (key, total, payment) => {
+  try {
+    if (typeof sessionStorage === "undefined") return;
+    const payload = {
+      createdAt: Date.now(),
+      total,
+      payment,
+    };
+    sessionStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+};
 
 /* ================= WHATSAPP BUILDER ================== */
 
@@ -240,12 +277,15 @@ export function useCheckout() {
   const [pixError, setPixError] = useState("");
   const pixIdempotencyRef = useRef(null);
   const pixTotalRef = useRef(null);
+  const pixAutoKeyRef = useRef(null);
 
   // CARTÃO (AXIONPAY)
   const [cardPayment, setCardPayment] = useState(null);
   const [cardLoading, setCardLoading] = useState(false);
   const [cardError, setCardError] = useState("");
   const cardIdempotencyRef = useRef(null);
+  const cardTotalRef = useRef(null);
+  const cardAutoKeyRef = useRef(null);
 
   const { customer } = useAuth();
 
@@ -415,11 +455,26 @@ export function useCheckout() {
     : distanceFee != null && !deliveryEtaLoading && !deliveryEtaError;
   const podeAvancarDados = dadosValidos && distanciaOk;
 
+  const cardCheckoutUrl = useMemo(() => {
+    if (!cardPayment) return "";
+    return (
+      cardPayment.checkoutUrl ||
+      cardPayment?.metadata?.providerRaw?.url ||
+      cardPayment?.metadata?.url ||
+      cardPayment?.url ||
+      ""
+    );
+  }, [cardPayment]);
+
   const hasPixData =
     pagamento !== "pix" ||
     Boolean(pixPayment?.copiaColar || pixPayment?.qrcode);
 
-  const podeEnviar = !semItens && podeAvancarDados && hasPixData && !enviando;
+  const hasCardData =
+    pagamento !== "cartao" || Boolean(cardCheckoutUrl);
+
+  const podeEnviar =
+    !semItens && podeAvancarDados && hasPixData && hasCardData && !enviando;
 
   /* =========== CUPOM =========== */
 
@@ -437,126 +492,144 @@ export function useCheckout() {
     setPixPayment(null);
     setPixError("");
     pixIdempotencyRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    if (pagamento !== "pix") {
-      resetPixPayment();
+    pixTotalRef.current = null;
+    pixAutoKeyRef.current = null;
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem(PIX_SESSION_KEY);
+      }
+    } catch {
+      // ignore
     }
-  }, [pagamento, resetPixPayment]);
+  }, []);
 
   useEffect(() => {
     const previousTotal = pixTotalRef.current;
     pixTotalRef.current = totalFinal;
 
-    if (pagamento !== "pix") return;
     if (previousTotal == null) return;
     if (previousTotal === totalFinal) return;
     if (!pixPayment) return;
 
     resetPixPayment();
-  }, [totalFinal, pagamento, pixPayment, resetPixPayment]);
+  }, [totalFinal, pixPayment, resetPixPayment]);
 
   const buildPixPayload = (customerIdAtual) => {
-    const amountNumber = Number((totalFinal || 0).toFixed(2));
-    const amountCents = Math.max(1, Math.round(amountNumber * 100));
+    const amount = Number(totalFinal.toFixed(2));
     const phoneDigits = (dados.telefone || "").replace(/\D/g, "");
 
     return {
-      amount: amountNumber,
-      amount_cents: amountCents,
-      currency: "BRL",
+      amount,
       customer: {
-        id: customerIdAtual || dados.customerId || null,
-        name: dados.nome || undefined,
+        name: dados.nome || "Cliente",
         email: dados.email || undefined,
-        phone: phoneDigits || undefined,
       },
       metadata: {
         source: "anne-tom-site",
-        orderId: dados.orderId || undefined,
-        orderTotal: totalFinal,
-        itemsCount: totalItens,
-        customerId: customerIdAtual || dados.customerId || null,
-        address: dados.retirada
-          ? undefined
-          : {
-              cep: dados.cep || undefined,
-              street: dados.endereco || undefined,
-              neighborhood: dados.bairro || undefined,
-              number: dados.numero || undefined,
-              complement: dados.complemento || undefined,
-              city: dados.cidade || undefined,
-              state: dados.uf || undefined,
-            },
+        orderId:
+          dados.orderId ||
+          customerIdAtual ||
+          dados.customerId ||
+          undefined,
+        customerPhone: phoneDigits || undefined,
       },
     };
   };
 
   const createPixPayment = async ({ force = false, customerId } = {}) => {
-    if (pixPayment && !force) return pixPayment;
+    if (!force && pixPayment) return pixPayment;
+
+    if (!force && !pixPayment) {
+      const cached = loadPaymentFromSession(PIX_SESSION_KEY, totalFinal);
+      if (cached) {
+        setPixPayment(cached);
+        pixTotalRef.current = totalFinal;
+        return cached;
+      }
+    }
 
     setPixError("");
     setPixLoading(true);
 
-    if (!pixIdempotencyRef.current || force) {
-      pixIdempotencyRef.current =
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `pix-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-    }
-
     try {
-      const requestPayload = buildPixPayload(customerId);
-      // Envio direto para o endpoint Pix
-      const res = await fetch(AXIONPAY_PIX_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": API_KEY,
-          "Idempotency-Key": pixIdempotencyRef.current,
-        },
-        body: JSON.stringify(requestPayload),
-      });
-      const data = await res.json();
-      const responsePayload = data?.transaction || data?.data || null;
+      if (!pixIdempotencyRef.current || force) {
+        pixIdempotencyRef.current =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `pix-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+      }
 
-      if (!res.ok || !responsePayload) {
-        setPixError(data?.message || "Nao foi possivel gerar o Pix agora.");
+      const requestPayload = buildPixPayload(customerId);
+      const res = await server.createPixPayment(
+        requestPayload,
+        pixIdempotencyRef.current
+      );
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data) {
+        setPixError(
+          data?.message || "Nao foi possivel gerar o Pix agora."
+        );
         return null;
       }
 
-      const pixRaw =
-        responsePayload?.metadata?.pix?.raw ||
-        responsePayload?.metadata?.pix ||
-        responsePayload?.pix ||
-        responsePayload ||
-        null;
+      let copiaColar = null;
+      let qrcode = null;
+      let transactionId = null;
+      let providerReference = null;
+      let status = null;
+      let amount = Number(totalFinal.toFixed(2));
+      let amountCents = Math.round(amount * 100);
+
+      if (typeof data.payload === "string") {
+        copiaColar = data.payload;
+      }
+
+      const tx = data.transaction || data.data || null;
+      if (tx) {
+        transactionId = tx.id || tx.transactionId || transactionId;
+        providerReference = tx.providerReference || providerReference;
+        status = tx.status || status;
+        amount = tx.amount != null ? tx.amount : amount;
+        amountCents = tx.amountCents || tx.amount_cents || amountCents;
+
+        const metaPix = tx.metadata?.pix || tx.metadata || {};
+        if (!copiaColar) {
+          copiaColar =
+            metaPix.copia_colar ||
+            metaPix.copiaColar ||
+            metaPix.copyPaste ||
+            metaPix.pix_payload ||
+            null;
+        }
+        qrcode =
+          metaPix.qrcode ||
+          metaPix.qrCode ||
+          metaPix.qr_code ||
+          metaPix.pix_qr_code ||
+          null;
+      }
+
+      if (!copiaColar) {
+        setPixError("Nao foi possivel gerar o Pix agora.");
+        return null;
+      }
 
       const nextPixPayment = {
-        transactionId:
-          responsePayload?.id || responsePayload?.transactionId || null,
-        providerReference: responsePayload?.providerReference || null,
-        status: responsePayload?.status || null,
-        amount: responsePayload?.amount || null,
-        amountCents: responsePayload?.amount_cents || null,
-        qrcode:
-          pixRaw?.qrcode ||
-          pixRaw?.qrCode ||
-          pixRaw?.qr_code ||
-          pixRaw?.pix_qr_code ||
-          null,
-        copiaColar:
-          pixRaw?.copia_colar ||
-          pixRaw?.copiaColar ||
-          pixRaw?.copyPaste ||
-          pixRaw?.pix_payload ||
-          null,
-        expiresAt: pixRaw?.expiresAt || pixRaw?.expires_at || null,
-        raw: pixRaw,
+        transactionId,
+        providerReference,
+        status,
+        amount,
+        amountCents,
+        qrcode,
+        copiaColar,
+        expiresAt: null,
+        raw: data,
       };
 
       setPixPayment(nextPixPayment);
+      savePaymentToSession(PIX_SESSION_KEY, totalFinal, nextPixPayment);
+      pixTotalRef.current = totalFinal;
       return nextPixPayment;
     } catch (err) {
       console.error("[useCheckout] pix error:", err);
@@ -573,16 +646,33 @@ export function useCheckout() {
     setCardPayment(null);
     setCardError("");
     cardIdempotencyRef.current = null;
+    cardTotalRef.current = null;
+    cardAutoKeyRef.current = null;
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem(CARD_SESSION_KEY);
+      }
+    } catch {
+      // ignore
+    }
   }, []);
 
   useEffect(() => {
-    if (pagamento !== "cartao") {
-      resetCardPayment();
-    }
-  }, [pagamento, resetCardPayment]);
+    const previousTotal = cardTotalRef.current;
+    cardTotalRef.current = totalFinal;
+
+    if (previousTotal == null) return;
+    if (previousTotal === totalFinal) return;
+    if (!cardPayment) return;
+
+    resetCardPayment();
+  }, [totalFinal, cardPayment, resetCardPayment]);
 
   const buildCardPayload = () => {
-    const amount = totalFinal;
+    const amount = Number(totalFinal.toFixed(2));
+    const returnBase = "https://annetom.com/confirmacao";
+    const successUrl = `${returnBase}?paymentStatus=paid`;
+    const failureUrl = `${returnBase}?paymentStatus=failed`;
     return {
       amount,
       customer: {
@@ -590,6 +680,10 @@ export function useCheckout() {
         email: dados.email,
         phone_number: dados.telefone,
       },
+      card: dados.card || undefined,
+      return_url: returnBase,
+      success_url: successUrl,
+      failure_url: failureUrl,
       metadata: {
         address: {
           cep: dados.cep,
@@ -599,60 +693,95 @@ export function useCheckout() {
           complement: dados.complemento,
         },
         orderId: dados.orderId || undefined,
+        redirect_url: returnBase,
+        webhook_url: "https://pdv.axionenterprise.cloud/annetom/api/order/confirm",
       },
     };
   };
 
   const createCardPayment = async ({ force = false } = {}) => {
-    if (cardPayment && !force) return cardPayment;
+    if (!force && cardPayment) return cardPayment;
+
+    if (!force && !cardPayment) {
+      const cached = loadPaymentFromSession(CARD_SESSION_KEY, totalFinal);
+      if (cached) {
+        setCardPayment(cached);
+        return cached;
+      }
+    }
+
     setCardError("");
     setCardLoading(true);
 
-    if (!cardIdempotencyRef.current || force) {
-      cardIdempotencyRef.current =
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `card-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-    }
-
     try {
+      if (!cardIdempotencyRef.current || force) {
+        cardIdempotencyRef.current =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `card-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+      }
+
       const requestPayload = buildCardPayload();
-      // Envio direto para o endpoint Cartão
-      const res = await fetch(AXIONPAY_CARD_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": cardIdempotencyRef.current,
-          "x-api-key": API_KEY,
-        },
-        body: JSON.stringify(requestPayload),
-      });
-      const data = await res.json();
+      const res = await server.createCardPayment(
+        requestPayload,
+        cardIdempotencyRef.current
+      );
+      const data = await res.json().catch(() => null);
       const responsePayload = data?.transaction || data?.data || null;
 
       if (!res.ok || !responsePayload) {
         setCardError(
-          data?.message || "Não foi possível processar o cartão agora."
+          data?.message || "Nao foi possivel processar o cartao agora."
         );
         return null;
       }
 
       setCardPayment(responsePayload);
-
-      const url = responsePayload?.metadata?.providerRaw?.url;
-      if (url) {
-        window.location.href = url;
-      }
+      savePaymentToSession(CARD_SESSION_KEY, totalFinal, responsePayload);
+      cardTotalRef.current = totalFinal;
 
       return responsePayload;
     } catch (err) {
       console.error("[useCheckout] card error:", err);
-      setCardError("Não foi possível processar o cartão agora.");
+      setCardError("Nao foi possivel processar o cartao agora.");
       return null;
     } finally {
       setCardLoading(false);
     }
   };
+
+  // Geracao automatica das transacoes de pagamento (PIX/cartao) ao entrar no passo "Pagamento"
+  useEffect(() => {
+    if (passo !== 3) {
+      pixAutoKeyRef.current = null;
+      cardAutoKeyRef.current = null;
+      return;
+    }
+
+    if (!pixPayment && !pixLoading) {
+      const pixKey = `pix:${totalFinal.toFixed(2)}`;
+      if (pixAutoKeyRef.current !== pixKey) {
+        pixAutoKeyRef.current = pixKey;
+        createPixPayment().catch(() => {});
+      }
+    }
+
+    if (!cardPayment && !cardLoading) {
+      const cardKey = `card:${totalFinal.toFixed(2)}`;
+      if (cardAutoKeyRef.current !== cardKey) {
+        cardAutoKeyRef.current = cardKey;
+        createCardPayment().catch(() => {});
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    passo,
+    totalFinal,
+    pixPayment,
+    pixLoading,
+    cardPayment,
+    cardLoading,
+  ]);
 
   /* =========== ETA ENTREGA (DISTANCE MATRIX) =========== */
 
@@ -1000,6 +1129,7 @@ export function useCheckout() {
     cardLoading,
     cardError,
     createCardPayment,
+    cardCheckoutUrl,
 
     // totais
     subtotal,

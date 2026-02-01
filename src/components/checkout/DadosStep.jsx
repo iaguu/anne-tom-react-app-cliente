@@ -52,6 +52,46 @@ const liberarCampos =
   phoneDigits.length >= 10 &&
   (tipoCliente === "existing" || tipoCliente === "novo");
 
+const showInfoHint = !dados.nome.trim() && !dados.obsGerais.trim() && !cupom.trim();
+const showAddressHint = !dados.endereco.trim() && !dados.cep.trim() && !dados.bairro.trim();
+
+const applyExistingAddress = () => {
+  const address = clienteExistente?.address || null;
+  if (!address) return;
+  const street = address.street || address.endereco || "";
+  const rawNeighborhood = address.neighborhood || address.bairro || "";
+  const cep = address.cep || "";
+  const fallbackNeighborhood =
+    !rawNeighborhood && street.includes(" - ")
+      ? street.split(" - ").slice(-1)[0].trim()
+      : "";
+  const neighborhood = rawNeighborhood || fallbackNeighborhood;
+  const endereco = street || neighborhood || "";
+
+  setDados({
+    ...dados,
+    endereco: endereco || dados.endereco,
+    bairro: neighborhood || dados.bairro,
+    cep: cep || dados.cep,
+  });
+
+  if (cep && !neighborhood && typeof buscarCep === "function") {
+    setTimeout(() => {
+      buscarCep();
+    }, 0);
+  }
+};
+
+const appliedExistingRef = React.useRef(false);
+
+React.useEffect(() => {
+  if (appliedExistingRef.current) return;
+  if (!clienteExistente?.address) return;
+  if (dados.endereco && dados.endereco.trim()) return;
+  applyExistingAddress();
+  appliedExistingRef.current = true;
+}, [clienteExistente, dados.endereco]);
+
 // auto-consulta na API quando é "Já sou cliente"
 React.useEffect(() => {
   // só consulta para "Já sou cliente"
@@ -175,52 +215,119 @@ React.useEffect(() => {
       <div
         className={`transition-all duration-300 ease-out origin-top ${
           liberarCampos
-            ? "opacity-100 max-h-[1000px] translate-y-0"
+            ? "opacity-100 max-h-[1400px] translate-y-0"
             : "opacity-0 max-h-0 -translate-y-1 overflow-hidden pointer-events-none"
         } space-y-4`}
       >
-        <input
-          type="text"
-          placeholder="Nome completo"
-          value={dados.nome}
-          onChange={(e) => setDados({ ...dados, nome: e.target.value })}
-          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300"
-        />
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              Informacoes
+            </p>
+            {showInfoHint && (
+              <p className="text-[11px] text-slate-500">
+                Nome, contato e observacoes do pedido.
+              </p>
+            )}
+          </div>
 
-        <div className="grid md:grid-cols-[2fr_1fr] gap-3 items-center">
           <input
             type="text"
-            placeholder="CEP"
-            value={dados.cep}
-            onChange={(e) => setDados({ ...dados, cep: e.target.value })}
-            onBlur={buscarCep}
+            placeholder="Nome completo"
+            value={dados.nome}
+            onChange={(e) => setDados({ ...dados, nome: e.target.value })}
             className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300"
           />
-          <button
-            type="button"
-            onClick={buscarCep}
-            disabled={buscandoCep}
-            className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 disabled:opacity-60"
-          >
-            {buscandoCep ? "Buscando CEP..." : "Recarregar pelo CEP"}
-          </button>
-        </div>
 
-        {erroCep && (
-          <p className="text-[11px] text-red-500">{erroCep}</p>
-        )}
+          <textarea
+            placeholder="Observacoes gerais do pedido (ex.: portaria, troco, ponto da borda...)"
+            value={dados.obsGerais}
+            onChange={(e) =>
+              setDados({ ...dados, obsGerais: e.target.value })
+            }
+            className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300"
+          />
 
-        <textarea
-          placeholder="Endereço completo (rua, número, complemento, cidade, UF)"
-          value={dados.endereco}
-          onChange={(e) =>
-            setDados({ ...dados, endereco: e.target.value })
-          }
-          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300"
-        />
+          <div className="grid md:grid-cols-[2fr_1fr] gap-3 items-center">
+            <input
+              type="text"
+              placeholder="Cupom (ex.: PRIMEIRA)"
+              value={cupom}
+              onChange={(e) => setCupom(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-sm"
+            />
+            <button
+              type="button"
+              onClick={aplicarCupom}
+              className="px-4 py-2 rounded-xl bg-slate-200 text-xs hover:bg-slate-300"
+            >
+              Aplicar cupom
+            </button>
+          </div>
+        </section>
 
-        <div className="grid md:grid-cols-2 gap-4 items-start">
-          <div className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              Endereco e entrega
+            </p>
+            {showAddressHint && (
+              <p className="text-[11px] text-slate-500">
+                Confirme o endereco para calcular taxa e tempo.
+              </p>
+            )}
+          </div>
+
+          {clienteExistente?.address && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[11px] text-emerald-800">
+              <p className="font-semibold">Endereco cadastrado</p>
+              <p className="mt-1">
+                {clienteExistente.address.street} - {clienteExistente.address.neighborhood}
+              </p>
+              <button
+                type="button"
+                onClick={applyExistingAddress}
+                className="mt-2 rounded-full border border-emerald-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 hover:bg-emerald-100"
+              >
+                Usar este endereco
+              </button>
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-[2fr_1fr] gap-3 items-center">
+            <input
+              type="text"
+              placeholder="CEP"
+              value={dados.cep}
+              onChange={(e) => setDados({ ...dados, cep: e.target.value })}
+              onBlur={buscarCep}
+              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300"
+            />
+            <button
+              type="button"
+              onClick={buscarCep}
+              disabled={buscandoCep}
+              className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 disabled:opacity-60"
+            >
+              {buscandoCep ? "Buscando CEP..." : "Recarregar pelo CEP"}
+            </button>
+          </div>
+
+          {erroCep && (
+            <p className="text-[11px] text-red-500">{erroCep}</p>
+          )}
+
+          <textarea
+            placeholder="Endereco completo (rua, numero, complemento, cidade, UF)"
+            value={dados.endereco}
+            onChange={(e) =>
+              setDados({ ...dados, endereco: e.target.value })
+            }
+            className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300"
+          />
+
+          <div className="grid md:grid-cols-2 gap-4 items-start">
+            <div className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
               {dados.bairro ? (
                 <>
                   <p className="font-semibold text-slate-800">
@@ -280,45 +387,20 @@ React.useEffect(() => {
                   automaticamente.
                 </p>
               )}
+            </div>
+
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={dados.retirada}
+                onChange={() =>
+                  setDados((d) => ({ ...d, retirada: !d.retirada }))
+                }
+              />
+              Retirada na loja (remove a taxa de entrega)
+            </label>
           </div>
-
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={dados.retirada}
-              onChange={() =>
-                setDados((d) => ({ ...d, retirada: !d.retirada }))
-              }
-            />
-            Retirada na loja (remove a taxa de entrega)
-          </label>
-        </div>
-
-        <textarea
-          placeholder="Observações gerais do pedido (ex.: portaria, troco, ponto da borda...)"
-          value={dados.obsGerais}
-          onChange={(e) =>
-            setDados({ ...dados, obsGerais: e.target.value })
-          }
-          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300"
-        />
-
-        <div className="grid md:grid-cols-[2fr_1fr] gap-3 items-center">
-          <input
-            type="text"
-            placeholder="Cupom (ex.: PRIMEIRA)"
-            value={cupom}
-            onChange={(e) => setCupom(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-sm"
-          />
-          <button
-            type="button"
-            onClick={aplicarCupom}
-            className="px-4 py-2 rounded-xl bg-slate-200 text-xs hover:bg-slate-300"
-          >
-            Aplicar cupom
-          </button>
-        </div>
+        </section>
       </div>
     </div>
   );

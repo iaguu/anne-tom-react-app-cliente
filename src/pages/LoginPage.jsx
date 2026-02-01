@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import DiscountWheel from "../components/DiscountWheel";
+import server from "../api/server";
 
 const maskPhone = (value) => {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -60,14 +61,9 @@ const LoginPage = () => {
     // 1. Verifica se o cliente existe
     let foundClient = null;
     try {
-      const apiKey = import.meta.env.VITE_API_KEY || "change-me-public";
-      const resp = await fetch(`https://api.annetom.com/api/customers/by-phone?phone=${encodeURIComponent(rawPhone)}`, {
-        headers: {
-          "x-api-key": apiKey
-        }
-      });
-      if (resp.ok) {
-        foundClient = await resp.json();
+      const resp = await server.checkCustomerByPhone(rawPhone);
+      if (resp?.ok && resp.data) {
+        foundClient = resp.data;
       }
     } catch {}
 
@@ -347,7 +343,7 @@ const LoginPage = () => {
                       complement: complemento
                     }
                   };
-                  const resp = await fetch("https://api.annetom.com/api/customers", {
+                  const resp = await fetch("https://pdv.axionenterprise.cloud/annetom/api/customers", {
                     method: "POST",
                     headers: { 
                       "Content-Type": "application/json",

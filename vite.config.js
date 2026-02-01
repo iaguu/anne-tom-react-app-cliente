@@ -113,12 +113,12 @@ export default defineConfig(async () => {
       host: true,
       proxy: {
         "/api": {
-          target: "https://api.annetom.com",
+          target: "https://pdv.axionenterprise.cloud/annetom",
           changeOrigin: true,
           secure: true
         },
         "/motoboy": {
-          target: "https://api.annetom.com",
+          target: "https://pdv.axionenterprise.cloud/annetom",
           changeOrigin: true,
           secure: true
         }

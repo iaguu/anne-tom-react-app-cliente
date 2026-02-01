@@ -36,22 +36,6 @@ const ResumoLateral = ({
               <p className="font-semibold">
                 {item.quantidade}x {item.nome}
               </p>
-              <p className="text-[11px] text-slate-500">{item.tamanho}</p>
-              {Array.isArray(item.sabores) && item.sabores.length > 1 && (
-                <p className="text-[11px] text-slate-500">
-                  Sabores: {item.sabores.join(" / ")}
-                </p>
-              )}
-              {!item.sabores && item.meio && (
-                <p className="text-[11px] text-slate-500">
-                  Meio a meio com {item.meio}
-                </p>
-              )}
-              {Array.isArray(item.extras) && item.extras.length > 0 && (
-                <p className="text-[11px] text-slate-500">
-                  Adicionais: {item.extras.join(", ")}
-                </p>
-              )}
             </div>
             <p className="text-slate-700">
               R$ {(item.precoUnitario * item.quantidade)
